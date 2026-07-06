@@ -1,0 +1,7 @@
+# Local AI tooling state/config — machine-specific, not project code
+.agents/
+.codex/
+.devin/
+.impeccable/
+.claude/
+skills-lock.json
