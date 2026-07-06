@@ -65,12 +65,19 @@ function money_short(float $value): string
     return number_format($value, 0);
 }
 
-function trend_label(float $value, string $language = 'en'): string
+function trend_label(float $value, string $language = 'en', string $suffix = ''): string
 {
     $class = $value >= 0 ? 'positive' : 'negative';
     $word = $value >= 0 ? ($language === 'th' ? 'เพิ่มขึ้น' : 'Up') : ($language === 'th' ? 'ลดลง' : 'Down');
-    $suffix = $language === 'th' ? 'เทียบช่วงเดียวกันปีก่อน' : 'vs last year';
+    if ($suffix === '') {
+        $suffix = $language === 'th' ? 'เทียบช่วงเดียวกันปีก่อน' : 'vs last year';
+    }
     return '<div class="change ' . $class . '">' . $word . ' ' . number_format(abs($value), 1) . '% ' . $suffix . '</div>';
+}
+
+function neutral_label(string $text): string
+{
+    return '<div class="change neutral">' . htmlspecialchars($text) . '</div>';
 }
 
 function request_value(string $key, string $default, array $allowed): string
@@ -241,6 +248,12 @@ $translations = [
         'cases' => 'เคส',
         'refund' => 'ยอดคืนเงิน',
         'chart_net_sales' => 'ยอดขายสุทธิ',
+        'baseline_yoy' => 'เทียบช่วงเดียวกันปีก่อน',
+        'baseline_mom' => 'เทียบช่วงเดียวกันเดือนก่อน',
+        'baseline_wow' => 'เทียบวันเดียวกันสัปดาห์ก่อน',
+        'no_baseline' => 'ยังไม่มีฐานปีก่อนให้เทียบ (ข้อมูลเริ่ม ธ.ค. 2025)',
+        'excluded_note' => 'ไม่รวมยกเลิก/คืนสินค้า',
+        'excluded_orders' => 'ออเดอร์',
     ],
     'en' => [
         'page_title' => 'Online Sales Dashboard',
@@ -315,6 +328,12 @@ $translations = [
         'cases' => 'Cases',
         'refund' => 'Refund',
         'chart_net_sales' => 'Net Sales',
+        'baseline_yoy' => 'vs same period last year',
+        'baseline_mom' => 'vs same period last month',
+        'baseline_wow' => 'vs same day last week',
+        'no_baseline' => 'No prior-year baseline yet (data starts Dec 2025)',
+        'excluded_note' => 'Excl. cancelled/returns',
+        'excluded_orders' => 'orders',
     ],
 ];
 $ui = $translations[$uiLanguage];
@@ -384,16 +403,37 @@ if ($filterValues['date_range'] === 'today') {
 }
 
 /**
- * YoY baseline = the exact same-length date range shifted back exactly one year
- * (e.g. "today" -> same calendar day last year; "MTD so far" -> the same N days
- * last year; YTD -> Jan 1-to-date last year). NOT a full prior month/year prorated
- * by an elapsed-day fraction — that approach was tried and produced the wrong sign
- * on the growth badges, because sales are not evenly distributed within a month.
- * A short elapsed window (e.g. 1-2 days into the month) prorated from a full month
- * can land far from the real same-day-last-year figure, in either direction.
+ * Growth baseline = the exact same-length window shifted back — never a full prior
+ * period prorated by elapsed-day fraction (that produced wrong-sign badges; sales
+ * cluster by weekday within a month).
+ *
+ * WHICH shift is chosen depends on data availability: OrderSummary only has real
+ * volume from Dec 2025 (Jul 2025 holds ฿370K of partial-import rows vs ~฿40M/month
+ * real — a YoY badge against that reads +10,000% and is pure noise). So YoY is used
+ * only when the shifted window lands entirely in reliable data; otherwise fall back
+ * to same-day-last-week (today) or same-span-last-month (MTD), and for YTD — which
+ * has no honest short-shift equivalent — show a neutral "no baseline yet" badge.
+ * Once the calendar passes Dec 2026 the MTD/today badges upgrade to YoY on their own.
  */
-$targetStart = (new DateTime($periodStart))->modify('-1 year')->format('Y-m-d');
-$targetEnd = (new DateTime($periodEnd))->modify('-1 year')->format('Y-m-d');
+const RELIABLE_DATA_FROM = '2025-12-01';
+$yoyStart = (new DateTime($periodStart))->modify('-1 year')->format('Y-m-d');
+if ($yoyStart >= RELIABLE_DATA_FROM) {
+    $baselineMode = 'yoy';
+    $targetStart = $yoyStart;
+    $targetEnd = (new DateTime($periodEnd))->modify('-1 year')->format('Y-m-d');
+} elseif ($filterValues['date_range'] === 'today') {
+    $baselineMode = 'wow';
+    $targetStart = (new DateTime($periodStart))->modify('-7 days')->format('Y-m-d');
+    $targetEnd = (new DateTime($periodEnd))->modify('-7 days')->format('Y-m-d');
+} elseif ($filterValues['date_range'] === 'mtd') {
+    $baselineMode = 'mom';
+    $targetStart = (new DateTime($periodStart))->modify('-1 month')->format('Y-m-d');
+    $targetEnd = (new DateTime($periodEnd))->modify('-1 month')->format('Y-m-d');
+} else {
+    $baselineMode = 'none';
+    $targetStart = $yoyStart;
+    $targetEnd = (new DateTime($periodEnd))->modify('-1 year')->format('Y-m-d');
+}
 
 $dayOfMonth = max(1, (int) ((new DateTime($periodStart))->diff(new DateTime($periodEnd))->days));
 $periodLabel = (new DateTime($periodStart))->format('M j') . ' - ' . (new DateTime($periodEnd))->modify('-1 day')->format('M j, Y');
@@ -427,6 +467,17 @@ if ($filterValues['sales_type'] !== 'all') {
 }
 $filterSql = $filterConditions ? ' AND ' . implode(' AND ', $filterConditions) : '';
 
+/**
+ * Cancelled/Return rows carry full netSale values (live check on a 30-day window:
+ * ฿5.5M cancelled + ฿0.5M returned ≈ 15% of the raw total), so counting them
+ * overstates every revenue/volume KPI. Applied to revenue queries only — the Order
+ * Status chart and the Exception Orders card must keep seeing all statuses, that is
+ * their whole job. The offline dashboard never had this problem (POS posts only
+ * completed sales), so excluding here brings the two channels onto the same meaning
+ * of "net sales".
+ */
+$validSalesSql = " AND orderStatus NOT IN ('Cancelled', 'Return')";
+
 $summaryRows = fetch_all($conn, "
     SELECT
         'mtd' AS period,
@@ -436,7 +487,7 @@ $summaryRows = fetch_all($conn, "
         SUM(priceBeforeDisc) AS grossSales,
         SUM(disShop + disVC) AS discount
     FROM dbo.OrderSummary
-    WHERE paymentDate >= ? AND paymentDate < ? {$filterSql}
+    WHERE paymentDate >= ? AND paymentDate < ? {$filterSql}{$validSalesSql}
 
     UNION ALL
 
@@ -448,7 +499,7 @@ $summaryRows = fetch_all($conn, "
         SUM(priceBeforeDisc) AS grossSales,
         SUM(disShop + disVC) AS discount
     FROM dbo.OrderSummary
-    WHERE paymentDate >= ? AND paymentDate < ? {$filterSql};
+    WHERE paymentDate >= ? AND paymentDate < ? {$filterSql}{$validSalesSql};
 ", params_for_periods([
     [$periodStart, $periodEnd],
     [$targetStart, $targetEnd],
@@ -485,7 +536,7 @@ $dailyTrend = fetch_all($conn, "
         SUM(netSale) AS netSales,
         SUM(disShop + disVC) AS discount
     FROM dbo.OrderSummary
-    WHERE paymentDate >= ? AND paymentDate < ? {$filterSql}
+    WHERE paymentDate >= ? AND paymentDate < ? {$filterSql}{$validSalesSql}
     GROUP BY CAST(paymentDate AS date)
     ORDER BY CAST(paymentDate AS date);
 ", repeated_params([$periodStart, $periodEnd], $filterParams));
@@ -505,7 +556,7 @@ $platforms = fetch_all($conn, "
         SUM(priceBeforeDisc) AS grossSales,
         SUM(disShop + disVC) AS discount
     FROM dbo.OrderSummary
-    WHERE paymentDate >= ? AND paymentDate < ? {$filterSql}
+    WHERE paymentDate >= ? AND paymentDate < ? {$filterSql}{$validSalesSql}
     GROUP BY shopName
     ORDER BY netSales DESC;
 ", repeated_params([$periodStart, $periodEnd], $filterParams));
@@ -524,7 +575,7 @@ $payments = fetch_all($conn, "
         COUNT(DISTINCT orderId) AS orders,
         SUM(netSale) AS netSales
     FROM dbo.OrderSummary
-    WHERE paymentDate >= ? AND paymentDate < ? {$filterSql}
+    WHERE paymentDate >= ? AND paymentDate < ? {$filterSql}{$validSalesSql}
     GROUP BY CASE
             WHEN paymentMethod LIKE '%COD%' THEN 'COD'
             WHEN paymentMethod LIKE '%PayLater%' OR paymentMethod LIKE '%PAY_LATER%' OR paymentMethod LIKE '%SPayLater%' THEN 'Pay Later'
@@ -544,7 +595,7 @@ $productMix = fetch_all($conn, "
         SUM(netSale) AS netSales,
         SUM(disShop + disVC) AS discount
     FROM dbo.OrderSummary
-    WHERE paymentDate >= ? AND paymentDate < ? {$filterSql}
+    WHERE paymentDate >= ? AND paymentDate < ? {$filterSql}{$validSalesSql}
     GROUP BY {$productGroupSql}
     ORDER BY netSales DESC;
 ", repeated_params([$periodStart, $periodEnd], $filterParams));
@@ -559,7 +610,7 @@ $topProducts = fetch_all($conn, "
             SUM(disShop + disVC) AS discount,
             CASE WHEN SUM(priceBeforeDisc) > 0 THEN SUM(disShop + disVC) * 100.0 / SUM(priceBeforeDisc) ELSE 0 END AS discountRate
         FROM dbo.OrderSummary
-        WHERE paymentDate >= ? AND paymentDate < ? {$filterSql}
+        WHERE paymentDate >= ? AND paymentDate < ? {$filterSql}{$validSalesSql}
         GROUP BY sku, productName
         ORDER BY netSales DESC
     ),
@@ -603,7 +654,7 @@ $coverageRows = fetch_all($conn, "
     WITH mtdSku AS (
         SELECT TOP 15 sku, productName, SUM(qty) AS units, SUM(netSale) AS netSales
         FROM dbo.OrderSummary
-        WHERE paymentDate >= ? AND paymentDate < ? {$filterSql}
+        WHERE paymentDate >= ? AND paymentDate < ? {$filterSql}{$validSalesSql}
         GROUP BY sku, productName
         ORDER BY netSales DESC
     ),
@@ -652,6 +703,24 @@ $orderGrowth = pct_change($mtdOrders, $prevOrders);
 $unitGrowth = pct_change($mtdUnits, $prevUnits);
 $aovGrowth = pct_change($mtdAov, $prevAov);
 
+$growthBadge = function (float $growth) use ($baselineMode, $uiLanguage, $ui): string {
+    if ($baselineMode === 'none') {
+        return neutral_label(ui_text($ui, 'no_baseline'));
+    }
+    return trend_label($growth, $uiLanguage, ui_text($ui, 'baseline_' . $baselineMode));
+};
+
+// Money the KPIs deliberately leave out (see $validSalesSql) — surfaced in the hero
+// so the total doesn't silently drop ~15% vs what people saw before the fix.
+$excludedNet = 0.0;
+$excludedOrders = 0;
+foreach ($statusRows as $row) {
+    if (in_array((string) $row['orderStatus'], ['Cancelled', 'Return'], true)) {
+        $excludedNet += n($row['netSales']);
+        $excludedOrders += (int) $row['orders'];
+    }
+}
+
 $cancelled = 0;
 $returns = 0;
 $pending = 0;
@@ -689,6 +758,7 @@ require_once __DIR__ . '/includes/header.php';
     .metric-grid .kpi-card .target-line { color: #6B7280; font-size: 12px; line-height: 1.45; margin-top: 8px; }
     .change.positive { color: #10B981; }
     .change.negative { color: #EF4444; }
+    .change.neutral { color: #9CA3AF; }
     .section-title { display: flex; justify-content: space-between; align-items: center; margin: 6px 0 14px; }
     .section-title h2 { margin: 0; font-size: 16px; font-weight: 600; color: #111827; }
     .section-title span { font-size: 12px; color: #6B7280; }
@@ -732,11 +802,14 @@ require_once __DIR__ . '/includes/header.php';
         <div>
             <div class="online-hero-title"><?php echo htmlspecialchars(ui_text($ui, 'hero_title')); ?></div>
             <div class="online-hero-value"><?php echo number_format($mtdNetSales, 0); ?></div>
-            <div class="online-hero-trend"><?php echo trend_label($salesGrowth, $uiLanguage); ?></div>
+            <div class="online-hero-trend"><?php echo $growthBadge($salesGrowth); ?></div>
         </div>
         <div class="online-hero-meta">
             <div><?php echo htmlspecialchars($periodLabel); ?></div>
             <div><?php echo htmlspecialchars(ui_text($ui, 'source_ordersummary')); ?></div>
+            <?php if ($excludedNet > 0 || $excludedOrders > 0): ?>
+                <div><?php echo htmlspecialchars(ui_text($ui, 'excluded_note')); ?> <?php echo number_format($excludedNet, 0); ?> (<?php echo number_format($excludedOrders); ?> <?php echo htmlspecialchars(ui_text($ui, 'excluded_orders')); ?>)</div>
+            <?php endif; ?>
         </div>
     </div>
 </div>
@@ -745,17 +818,17 @@ require_once __DIR__ . '/includes/header.php';
     <div class="kpi-card">
         <div class="label"><?php echo htmlspecialchars(ui_text($ui, 'orders')); ?></div>
         <div class="value"><?php echo number_format($mtdOrders, 0); ?></div>
-        <?php echo trend_label($orderGrowth, $uiLanguage); ?>
+        <?php echo $growthBadge($orderGrowth); ?>
     </div>
     <div class="kpi-card">
         <div class="label"><?php echo htmlspecialchars(ui_text($ui, 'units_sold')); ?></div>
         <div class="value"><?php echo number_format($mtdUnits, 0); ?></div>
-        <?php echo trend_label($unitGrowth, $uiLanguage); ?>
+        <?php echo $growthBadge($unitGrowth); ?>
     </div>
     <div class="kpi-card">
         <div class="label"><?php echo htmlspecialchars(ui_text($ui, 'aov')); ?></div>
         <div class="value"><?php echo number_format($mtdAov, 0); ?></div>
-        <?php echo trend_label($aovGrowth, $uiLanguage); ?>
+        <?php echo $growthBadge($aovGrowth); ?>
     </div>
     <div class="kpi-card">
         <div class="label"><?php echo htmlspecialchars(ui_text($ui, 'upt')); ?></div>
