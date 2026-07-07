@@ -68,6 +68,12 @@ function ui_text(array $ui, string $key): string
     return $ui[$key] ?? $key;
 }
 
+function info_tip(array $ui, string $key): string
+{
+    return '<span class="info-tip"><span class="tip-icon">i</span><span class="tip-box">'
+        . htmlspecialchars(ui_text($ui, $key)) . '</span></span>';
+}
+
 function append_filter(array &$conditions, array &$params, string $condition, $value = null): void
 {
     $conditions[] = $condition;
@@ -203,6 +209,11 @@ $translations = [
         'branch_performance' => 'ผลการดำเนินงานตามสาขา', 'branch_col' => 'สาขา',
         'top_products' => 'สินค้าขายดี', 'product_col' => 'สินค้า', 'net_sales' => 'ยอดขายสุทธิ', 'units' => 'ชิ้น', 'disc_pct' => 'ส่วนลด %',
         'daily_control' => 'ควบคุมงานรายวัน', 'operator_followup' => 'สำหรับทีมปฏิบัติการสาขา',
+        'tip_daily_control' => 'สรุปสถานะปฏิบัติการวันนี้ในภาพรวม ก่อนลงรายละเอียดในตารางด้านล่าง',
+        'tip_attention' => 'เทียบยอดขายวันล่าสุดของแต่ละสาขากับค่าเฉลี่ยวันเดียวกัน 4 สัปดาห์ก่อน เพื่อจับสาขาที่ยอดตกผิดปกติหรือยังไม่ส่งยอด',
+        'tip_stall' => 'สินค้าที่เคยขายต่อเนื่องแต่เงียบไป 3 วันล่าสุด มักแปลว่าของหมดสต็อกที่สาขานั้น ควรเช็คก่อนลูกค้าถาม',
+        'tip_disc_anomaly' => 'จับสาขาที่ใช้ส่วนลดวันล่าสุดสูงผิดปกติเทียบกับพฤติกรรมปกติของสาขาเอง ใช้ตรวจสอบการกดส่วนลดหน้า POS',
+        'tip_heatmap' => 'ดูว่าสาขาไหนขายดีวันไหนของสัปดาห์ เพื่อวางแผนจัดกะพนักงานให้ตรงกับวันขายดี',
         'today_sales' => 'ยอดขายวันนี้',
         'discounted_orders' => 'ออเดอร์ที่มีส่วนลด', 'of_total_orders' => 'จากออเดอร์ทั้งหมด',
         'active_branches' => 'สาขาที่มียอดขาย', 'of_total_branches' => 'จากสาขาทั้งหมด',
@@ -259,6 +270,11 @@ $translations = [
         'branch_performance' => 'Branch Performance', 'branch_col' => 'Branch',
         'top_products' => 'Top Products', 'product_col' => 'Product', 'net_sales' => 'Net Sales', 'units' => 'Units', 'disc_pct' => 'Disc %',
         'daily_control' => 'Daily Control', 'operator_followup' => 'For branch operations follow-up',
+        'tip_daily_control' => 'Snapshot of today\'s operational status before you drill into the tables below.',
+        'tip_attention' => 'Compares each branch\'s latest-day sales to its own same-weekday average over the prior 4 weeks, to catch branches with an unusual drop or no sales reported yet.',
+        'tip_stall' => 'Products that sold steadily but went quiet for the last 3 days — usually means the branch is out of stock. Worth checking before a customer asks.',
+        'tip_disc_anomaly' => 'Flags branches whose latest-day discount rate is clearly above their own normal pattern, to help catch unusual POS discounting.',
+        'tip_heatmap' => 'Shows which weekday each branch sells best, for building staff schedules around actual demand.',
         'today_sales' => 'Today Sales',
         'discounted_orders' => 'Discounted Orders', 'of_total_orders' => 'of total orders',
         'active_branches' => 'Active Branches', 'of_total_branches' => 'of total branches',
@@ -869,6 +885,18 @@ require_once __DIR__ . '/includes/header.php';
     .ok-state .dot { width: 10px; height: 10px; border-radius: 999px; background: #10B981; flex: 0 0 auto; }
     .chart-card h3 { cursor: default; }
     .chart-card .hint { font-size: 10px; color: #9CA3AF; font-weight: 400; text-transform: none; margin-left: 6px; }
+    .section-title h2, .table-card h3 { display: flex; align-items: center; }
+    .info-tip { position: relative; display: inline-flex; align-items: center; margin-left: 7px; }
+    .info-tip .tip-icon { width: 15px; height: 15px; border-radius: 50%; background: #E5E7EB; color: #6B7280; font-size: 10px; font-weight: 700; display: flex; align-items: center; justify-content: center; cursor: help; }
+    .info-tip .tip-box {
+        position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%) translateY(-8px);
+        background: #1a1a2e; color: #fff; padding: 8px 12px; border-radius: 6px; font-size: 11px;
+        line-height: 1.4; font-weight: 400; text-transform: none; letter-spacing: normal;
+        white-space: normal; width: 240px; opacity: 0; visibility: hidden;
+        transition: opacity 0.15s ease, visibility 0.15s ease; z-index: 1000; pointer-events: none;
+    }
+    .info-tip .tip-box::after { content: ''; position: absolute; top: 100%; left: 50%; transform: translateX(-50%); border: 6px solid transparent; border-top-color: #1a1a2e; }
+    .info-tip:hover .tip-box { opacity: 1; visibility: visible; }
     @media (max-width: 1100px) {
         .metric-grid, .ops-grid { grid-template-columns: repeat(2, 1fr); }
         .analysis-grid, .three-grid { grid-template-columns: 1fr; }
@@ -1061,7 +1089,7 @@ require_once __DIR__ . '/includes/header.php';
 </div>
 
 <div class="section-title">
-    <h2><?php echo htmlspecialchars(ui_text($ui, 'daily_control')); ?></h2>
+    <h2><?php echo htmlspecialchars(ui_text($ui, 'daily_control')); ?><?php echo info_tip($ui, 'tip_daily_control'); ?></h2>
     <span><?php echo htmlspecialchars(ui_text($ui, 'operator_followup')); ?></span>
 </div>
 <div class="ops-grid">
@@ -1098,7 +1126,7 @@ require_once __DIR__ . '/includes/header.php';
 
 <div class="split-grid">
     <div class="table-card">
-        <h3><?php echo htmlspecialchars(ui_text($ui, 'attention_title')); ?></h3>
+        <h3><?php echo htmlspecialchars(ui_text($ui, 'attention_title')); ?><?php echo info_tip($ui, 'tip_attention'); ?></h3>
         <div class="table-note"><?php echo htmlspecialchars(ui_text($ui, 'attention_subtitle')); ?> · <?php echo htmlspecialchars($maxDate->format('j M Y')); ?></div>
         <?php if (empty($attentionBranches)): ?>
             <div class="ok-state"><span class="dot"></span><?php echo htmlspecialchars(ui_text($ui, 'attention_ok')); ?></div>
@@ -1129,7 +1157,7 @@ require_once __DIR__ . '/includes/header.php';
     </div>
 
     <div class="table-card">
-        <h3><?php echo htmlspecialchars(ui_text($ui, 'stall_title')); ?></h3>
+        <h3><?php echo htmlspecialchars(ui_text($ui, 'stall_title')); ?><?php echo info_tip($ui, 'tip_stall'); ?></h3>
         <div class="table-note"><?php echo htmlspecialchars(ui_text($ui, 'stall_subtitle')); ?></div>
         <?php if (empty($stallItems)): ?>
             <div class="ok-state"><span class="dot"></span><?php echo htmlspecialchars(ui_text($ui, 'stall_ok')); ?></div>
@@ -1166,7 +1194,7 @@ require_once __DIR__ . '/includes/header.php';
 </div>
 
 <div class="table-card" style="margin-bottom: 24px;">
-    <h3><?php echo htmlspecialchars(ui_text($ui, 'disc_anomaly_title')); ?></h3>
+    <h3><?php echo htmlspecialchars(ui_text($ui, 'disc_anomaly_title')); ?><?php echo info_tip($ui, 'tip_disc_anomaly'); ?></h3>
     <div class="table-note"><?php echo htmlspecialchars(ui_text($ui, 'disc_anomaly_subtitle')); ?> · <?php echo htmlspecialchars($maxDate->format('j M Y')); ?></div>
     <?php if (empty($discountAnomalies)): ?>
         <div class="ok-state"><span class="dot"></span><?php echo htmlspecialchars(ui_text($ui, 'disc_anomaly_ok')); ?></div>
@@ -1197,7 +1225,7 @@ require_once __DIR__ . '/includes/header.php';
 </div>
 
 <div class="table-card" style="margin-bottom: 24px;">
-    <h3><?php echo htmlspecialchars(ui_text($ui, 'heatmap_title')); ?></h3>
+    <h3><?php echo htmlspecialchars(ui_text($ui, 'heatmap_title')); ?><?php echo info_tip($ui, 'tip_heatmap'); ?></h3>
     <div class="table-note"><?php echo htmlspecialchars(ui_text($ui, 'heatmap_subtitle')); ?></div>
     <div class="heatmap-scroll">
         <table class="heatmap-table">
