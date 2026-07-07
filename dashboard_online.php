@@ -118,6 +118,11 @@ function ui_text(array $ui, string $key): string
     return $ui[$key] ?? $key;
 }
 
+function hint_icon(string $text): string
+{
+    return '<span class="hint-icon">?<span class="hint-bubble">' . htmlspecialchars($text) . '</span></span>';
+}
+
 function product_image_html(?string $picture, string $sku): string
 {
     $fallback = '<div class="product-thumb product-thumb-icon" aria-label="Image not available"><i class="fas fa-image"></i></div>';
@@ -254,6 +259,41 @@ $translations = [
         'no_baseline' => 'ยังไม่มีฐานปีก่อนให้เทียบ (ข้อมูลเริ่ม ธ.ค. 2025)',
         'excluded_note' => 'ไม่รวมยกเลิก/คืนสินค้า',
         'excluded_orders' => 'ออเดอร์',
+        'lost_revenue' => 'ยอดสูญเสียจากยกเลิก/คืน',
+        'out_of_stock' => 'สินค้าหมด',
+        'cancel_watch_title' => 'เฝ้าระวังอัตรายกเลิก',
+        'cancel_watch_subtitle' => 'อัตรายกเลิกล่าสุดเทียบค่าเฉลี่ย 30 วัน แยกตามแพลตฟอร์ม',
+        'cancel_watch_ok' => 'ไม่มีแพลตฟอร์มที่อัตรายกเลิกผิดปกติ',
+        'latest_col' => 'ล่าสุด',
+        'norm_col' => 'ปกติ (30 วัน)',
+        'lost_revenue_col' => 'ยอดสูญเสีย',
+        'attention_title' => 'แพลตฟอร์มที่ต้องติดตาม',
+        'attention_subtitle' => 'ยอดขายวันล่าสุดเทียบค่าเฉลี่ยวันเดียวกันใน 4 สัปดาห์',
+        'attention_ok' => 'ทุกแพลตฟอร์มยอดขายอยู่ในเกณฑ์ปกติ',
+        'status_no_sales' => 'ไม่มียอดขาย',
+        'status_below' => 'ต่ำกว่าปกติ',
+        'baseline_col' => 'ค่าเฉลี่ยปกติ',
+        'vs_normal_col' => '% ของปกติ',
+        'status_col' => 'สถานะ',
+        'disc_anomaly_title' => 'ส่วนลดผิดปกติ',
+        'disc_anomaly_subtitle' => '% ส่วนลดวันล่าสุดเทียบค่าเฉลี่ย 28 วัน แยกตามแพลตฟอร์ม',
+        'disc_anomaly_ok' => 'ไม่พบส่วนลดผิดปกติ',
+        'disc_latest_col' => 'ส่วนลดล่าสุด',
+        'disc_norm_col' => 'ส่วนลดปกติ',
+        'disc_diff_col' => 'ส่วนต่าง',
+        'gross_col' => 'ยอดขายก่อนหักส่วนลด',
+        'projection_label' => 'คาดการณ์สิ้นเดือน',
+        'projection_note' => 'คำนวณจากยอดจริง + ค่าเฉลี่ยตามวันในสัปดาห์',
+        'vs_prev_month' => 'เทียบเดือนก่อน',
+        'vs_same_month_ly' => 'เทียบเดือนเดียวกันปีก่อน',
+        'tooltip_cancel_watch' => 'เทียบอัตรายกเลิกออเดอร์ของแต่ละแพลตฟอร์มในวันล่าสุด กับค่าเฉลี่ย 30 วันย้อนหลัง ถ้าสูงผิดปกติจะขึ้นเตือนพร้อมมูลค่ายอดขายที่เสียไป',
+        'tooltip_attention' => 'เทียบยอดขายวันล่าสุดของแต่ละแพลตฟอร์ม กับค่าเฉลี่ยยอดขาย "วันเดียวกันของสัปดาห์" (เช่น จันทร์เทียบจันทร์) ย้อนหลัง 4 สัปดาห์ ถ้าต่ำกว่าปกติมากจะขึ้นเตือน',
+        'tooltip_disc_anomaly' => 'เทียบ % ส่วนลดวันล่าสุด กับค่าเฉลี่ยส่วนลด 28 วันย้อนหลัง ถ้าส่วนลดพุ่งขึ้นผิดปกติ อาจเป็นสัญญาณตั้งราคาผิดหรือโปรที่ไม่ได้วางแผน',
+        'tooltip_projection' => 'คาดการณ์ยอดขายรวมทั้งเดือน = ยอดที่ขายไปแล้ว + ค่าเฉลี่ยยอดขายตามวันในสัปดาห์ของวันที่เหลือ (ให้น้ำหนักเสาร์-อาทิตย์มากกว่าวันธรรมดา)',
+        'tooltip_vs_prev_month' => 'ยอดคาดการณ์สิ้นเดือนนี้ เทียบกับยอดขายจริงทั้งเดือนของเดือนก่อนหน้า',
+        'tooltip_vs_same_month_ly' => 'ยอดคาดการณ์สิ้นเดือนนี้ เทียบกับยอดขายจริงของเดือนเดียวกันปีที่แล้ว แสดงเฉพาะเมื่อมีข้อมูลปีก่อนที่เชื่อถือได้ (เริ่ม ธ.ค. 2025)',
+        'tooltip_lost_revenue' => 'ยอดขายที่หายไปจากออเดอร์ที่ถูกยกเลิกหรือคืนสินค้า ในช่วงเวลาที่เลือก',
+        'tooltip_cover' => 'จำนวนวันที่สต็อกปัจจุบันจะขายหมด คำนวณจากอัตราขายเฉลี่ยต่อวัน ถ้าสต็อกเหลือ 0 จะขึ้น "สินค้าหมด"',
     ],
     'en' => [
         'page_title' => 'Online Sales Dashboard',
@@ -334,6 +374,41 @@ $translations = [
         'no_baseline' => 'No prior-year baseline yet (data starts Dec 2025)',
         'excluded_note' => 'Excl. cancelled/returns',
         'excluded_orders' => 'orders',
+        'lost_revenue' => 'Lost revenue (cancel/return)',
+        'out_of_stock' => 'Out of stock',
+        'cancel_watch_title' => 'Cancel-Rate Watch',
+        'cancel_watch_subtitle' => 'Latest-day cancel rate vs 30-day norm, by platform',
+        'cancel_watch_ok' => 'No platform showing an unusual cancel rate',
+        'latest_col' => 'Latest',
+        'norm_col' => 'Norm (30d)',
+        'lost_revenue_col' => 'Lost Revenue',
+        'attention_title' => 'Platforms Needing Attention',
+        'attention_subtitle' => 'Latest day vs same-weekday 4-week average',
+        'attention_ok' => 'All platforms tracking within normal range',
+        'status_no_sales' => 'No sales',
+        'status_below' => 'Below normal',
+        'baseline_col' => 'Normal Avg',
+        'vs_normal_col' => '% of Normal',
+        'status_col' => 'Status',
+        'disc_anomaly_title' => 'Discount Anomaly',
+        'disc_anomaly_subtitle' => 'Latest-day discount % vs 28-day norm, by platform',
+        'disc_anomaly_ok' => 'No discount anomalies detected',
+        'disc_latest_col' => 'Latest Disc %',
+        'disc_norm_col' => 'Normal Disc %',
+        'disc_diff_col' => 'Diff',
+        'gross_col' => 'Gross Sales',
+        'projection_label' => 'Month-End Projection',
+        'projection_note' => 'Actual so far + weekday-weighted average',
+        'vs_prev_month' => 'vs Prev Month',
+        'vs_same_month_ly' => 'vs Same Month LY',
+        'tooltip_cancel_watch' => 'Compares each platform\'s cancel rate on the latest complete day against its 30-day average. Flags when unusually high, with the revenue value lost.',
+        'tooltip_attention' => 'Compares each platform\'s latest-day sales against its own average for the "same weekday" (e.g. Monday vs Monday) over the past 4 weeks. Flags when well below normal.',
+        'tooltip_disc_anomaly' => 'Compares each platform\'s discount % on the latest day against its 28-day average. A sudden spike may signal a pricing mistake or an unplanned promotion.',
+        'tooltip_projection' => 'Projected full-month total = sales so far + the weekday-weighted average for the remaining days (weekends weighted higher than weekdays).',
+        'tooltip_vs_prev_month' => 'This month\'s projected total compared with last month\'s actual full-month sales.',
+        'tooltip_vs_same_month_ly' => 'This month\'s projected total compared with the same month last year. Only shown once reliable prior-year data exists (from Dec 2025).',
+        'tooltip_lost_revenue' => 'Sales value lost from orders that were cancelled or returned in the selected period.',
+        'tooltip_cover' => 'Days the current stock will last at the average daily sell rate. Shows "Out of stock" when stock is 0.',
     ],
 ];
 $ui = $translations[$uiLanguage];
@@ -698,6 +773,190 @@ $afterSales = fetch_all($conn, "
     ORDER BY refundAmount DESC;
 ", [$periodStart, $periodEnd]);
 
+/**
+ * Daily-control alerts below all anchor to the latest COMPLETE day, not $maxDate.
+ * OrderSummary receives orders in near-real-time (spot check: 1,500 orders already
+ * booked by 09:51 on the current calendar day), so $maxDate itself is a partial day —
+ * comparing a half-finished day against a full-day baseline would flag every platform
+ * as "underperforming" until the day closes. Independent of the date_range filter,
+ * same rationale as offline's daily-control tools anchoring to its latest full day.
+ */
+$latestCompleteDate = (clone $maxDate)->modify('-1 day');
+$latestCompleteDateStr = $latestCompleteDate->format('Y-m-d');
+$latestCompleteDateNext = (clone $latestCompleteDate)->modify('+1 day')->format('Y-m-d');
+
+// --- Cancel-Rate Watch: latest complete day vs trailing 30-day norm, by platform ---
+$cancelWatchRows = fetch_all($conn, "
+    WITH latest AS (
+        SELECT shopName, COUNT(DISTINCT orderId) AS orders_,
+            COUNT(DISTINCT CASE WHEN orderStatus = 'Cancelled' THEN orderId END) AS cancelled_,
+            SUM(CASE WHEN orderStatus = 'Cancelled' THEN netSale ELSE 0 END) AS lostNet
+        FROM dbo.OrderSummary
+        WHERE CAST(paymentDate AS date) = ? {$filterSql}
+        GROUP BY shopName
+    ),
+    norm AS (
+        SELECT shopName, COUNT(DISTINCT orderId) AS orders_,
+            COUNT(DISTINCT CASE WHEN orderStatus = 'Cancelled' THEN orderId END) AS cancelled_
+        FROM dbo.OrderSummary
+        WHERE paymentDate >= DATEADD(day, -30, ?) AND paymentDate < ? {$filterSql}
+        GROUP BY shopName
+    )
+    SELECT l.shopName, l.orders_ AS latestOrders, l.cancelled_ AS latestCancelled, l.lostNet,
+        n.orders_ AS normOrders, n.cancelled_ AS normCancelled
+    FROM latest l LEFT JOIN norm n ON l.shopName = n.shopName;
+", array_merge([$latestCompleteDateStr], $filterParams, [$latestCompleteDateStr, $latestCompleteDateStr], $filterParams));
+
+$cancelWatch = [];
+foreach ($cancelWatchRows as $row) {
+    $latestOrders = (int) $row['latestOrders'];
+    if ($latestOrders < 20) {
+        continue; // too few orders for a rate to mean anything — avoids noise from tiny channels
+    }
+    $latestRate = n($row['latestCancelled']) * 100.0 / $latestOrders;
+    $normOrders = (int) $row['normOrders'];
+    $normRate = $normOrders > 0 ? n($row['normCancelled']) * 100.0 / $normOrders : 0.0;
+    $diff = $latestRate - $normRate;
+    if ($latestRate >= 15.0 || $diff >= 5.0) {
+        $cancelWatch[] = [
+            'shopName' => $row['shopName'],
+            'latestRate' => $latestRate,
+            'normRate' => $normRate,
+            'lostNet' => n($row['lostNet']),
+            'severity' => $latestRate >= 20.0 ? 'high' : 'medium',
+        ];
+    }
+}
+usort($cancelWatch, fn($a, $b) => $b['lostNet'] <=> $a['lostNet']);
+
+// --- Platform Attention List: latest complete day vs same-weekday 4-week average ---
+$attentionRows = fetch_all($conn, "
+    WITH latest AS (
+        SELECT shopName, SUM(netSale) AS net
+        FROM dbo.OrderSummary
+        WHERE CAST(paymentDate AS date) = ? {$filterSql}{$validSalesSql}
+        GROUP BY shopName
+    ),
+    baseline AS (
+        SELECT shopName, SUM(netSale) * 1.0 / COUNT(DISTINCT CAST(paymentDate AS date)) AS avgNet
+        FROM dbo.OrderSummary
+        WHERE CAST(paymentDate AS date) IN (DATEADD(week, -1, ?), DATEADD(week, -2, ?), DATEADD(week, -3, ?), DATEADD(week, -4, ?)) {$filterSql}{$validSalesSql}
+        GROUP BY shopName
+    )
+    SELECT b.shopName, ISNULL(l.net, 0) AS latestNet, b.avgNet
+    FROM baseline b LEFT JOIN latest l ON b.shopName = l.shopName;
+", array_merge(
+    [$latestCompleteDateStr], $filterParams,
+    [$latestCompleteDateStr, $latestCompleteDateStr, $latestCompleteDateStr, $latestCompleteDateStr], $filterParams
+));
+
+$attentionPlatforms = [];
+foreach ($attentionRows as $row) {
+    $baseline = n($row['avgNet']);
+    if ($baseline <= 0) {
+        continue;
+    }
+    $latestNet = n($row['latestNet']);
+    if ($latestNet <= 0) {
+        $attentionPlatforms[] = ['shopName' => $row['shopName'], 'latestNet' => 0.0, 'baseline' => $baseline, 'ratio' => 0.0, 'status' => 'no_sales'];
+        continue;
+    }
+    $ratio = $latestNet / $baseline * 100.0;
+    if ($ratio < 60.0) {
+        $attentionPlatforms[] = ['shopName' => $row['shopName'], 'latestNet' => $latestNet, 'baseline' => $baseline, 'ratio' => $ratio, 'status' => 'below'];
+    }
+}
+usort($attentionPlatforms, fn($a, $b) => $a['ratio'] <=> $b['ratio']);
+
+// --- Discount Anomaly: latest complete day vs trailing 28-day norm, by platform ---
+$discAnomalyRows = fetch_all($conn, "
+    WITH latest AS (
+        SELECT shopName, SUM(disShop + disVC) AS disc, SUM(priceBeforeDisc) AS gross
+        FROM dbo.OrderSummary
+        WHERE CAST(paymentDate AS date) = ? {$filterSql}{$validSalesSql}
+        GROUP BY shopName
+    ),
+    norm AS (
+        SELECT shopName, SUM(disShop + disVC) AS disc, SUM(priceBeforeDisc) AS gross
+        FROM dbo.OrderSummary
+        WHERE paymentDate >= DATEADD(day, -28, ?) AND paymentDate < ? {$filterSql}{$validSalesSql}
+        GROUP BY shopName
+    )
+    SELECT l.shopName, l.disc AS latestDisc, l.gross AS latestGross, n.disc AS normDisc, n.gross AS normGross
+    FROM latest l LEFT JOIN norm n ON l.shopName = n.shopName;
+", array_merge([$latestCompleteDateStr], $filterParams, [$latestCompleteDateStr, $latestCompleteDateStr], $filterParams));
+
+$discountAnomalies = [];
+foreach ($discAnomalyRows as $row) {
+    $latestGross = n($row['latestGross']);
+    if ($latestGross < 10000) {
+        continue; // materiality guard — small gross makes % swings meaningless
+    }
+    $latestPct = n($row['latestDisc']) * 100.0 / $latestGross;
+    $normGross = n($row['normGross']);
+    $normPct = $normGross > 0 ? n($row['normDisc']) * 100.0 / $normGross : 0.0;
+    $diff = $latestPct - $normPct;
+    if ($diff >= 5.0 && $latestPct >= 15.0) {
+        $discountAnomalies[] = ['shopName' => $row['shopName'], 'latestPct' => $latestPct, 'normPct' => $normPct, 'diff' => $diff, 'gross' => $latestGross];
+    }
+}
+usort($discountAnomalies, fn($a, $b) => $b['diff'] <=> $a['diff']);
+
+// --- Month-End Projection: actual so far + weekday-weighted average for remaining days ---
+$mtdStartForProj = new DateTime($latestCompleteDate->format('Y-m-01'));
+$mtdStartForProjStr = $mtdStartForProj->format('Y-m-d');
+$monthEndForProj = new DateTime($latestCompleteDate->format('Y-m-t'));
+
+$projActualRow = fetch_one($conn, "
+    SELECT SUM(netSale) AS net FROM dbo.OrderSummary
+    WHERE paymentDate >= ? AND paymentDate < ? {$filterSql}{$validSalesSql};
+", repeated_params([$mtdStartForProjStr, $latestCompleteDateNext], $filterParams));
+$projActualSoFar = n($projActualRow['net'] ?? 0);
+
+$weekdayAvgRows = fetch_all($conn, "
+    SELECT DATEPART(weekday, d) AS dow, AVG(net) AS avgNet FROM (
+        SELECT CAST(paymentDate AS date) AS d, SUM(netSale) AS net
+        FROM dbo.OrderSummary
+        WHERE paymentDate >= DATEADD(day, -56, ?) AND paymentDate < ? {$filterSql}{$validSalesSql}
+        GROUP BY CAST(paymentDate AS date)
+    ) x GROUP BY DATEPART(weekday, d);
+", repeated_params([$latestCompleteDateNext, $latestCompleteDateNext], $filterParams));
+$weekdayAvg = [];
+foreach ($weekdayAvgRows as $row) {
+    $weekdayAvg[(int) $row['dow']] = n($row['avgNet']);
+}
+
+$remainingProjected = 0.0;
+$projCursor = (clone $latestCompleteDate)->modify('+1 day');
+while ($projCursor <= $monthEndForProj) {
+    $dow = ((int) $projCursor->format('w')) + 1; // PHP w: Sun=0..Sat=6 -> SQL DATEPART(weekday): Sun=1..Sat=7
+    $remainingProjected += $weekdayAvg[$dow] ?? 0.0;
+    $projCursor->modify('+1 day');
+}
+$projectedMonthEnd = $projActualSoFar + $remainingProjected;
+
+$prevMonthStartForProj = (clone $mtdStartForProj)->modify('-1 month');
+$prevMonthRow = fetch_one($conn, "
+    SELECT SUM(netSale) AS net FROM dbo.OrderSummary
+    WHERE paymentDate >= ? AND paymentDate < ? {$filterSql}{$validSalesSql};
+", repeated_params([$prevMonthStartForProj->format('Y-m-d'), $mtdStartForProjStr], $filterParams));
+$prevMonthActual = n($prevMonthRow['net'] ?? 0);
+$projVsPrevMonth = pct_change($projectedMonthEnd, $prevMonthActual);
+
+$lyMonthStartForProj = (clone $mtdStartForProj)->modify('-1 year');
+$lyMonthHasReliableData = $lyMonthStartForProj->format('Y-m-d') >= RELIABLE_DATA_FROM;
+$lyMonthActual = 0.0;
+$projVsLastYear = 0.0;
+if ($lyMonthHasReliableData) {
+    $lyMonthEndForProj = (clone $lyMonthStartForProj)->modify('+1 month');
+    $lyMonthRow = fetch_one($conn, "
+        SELECT SUM(netSale) AS net FROM dbo.OrderSummary
+        WHERE paymentDate >= ? AND paymentDate < ? {$filterSql}{$validSalesSql};
+    ", repeated_params([$lyMonthStartForProj->format('Y-m-d'), $lyMonthEndForProj->format('Y-m-d')], $filterParams));
+    $lyMonthActual = n($lyMonthRow['net'] ?? 0);
+    $projVsLastYear = pct_change($projectedMonthEnd, $lyMonthActual);
+}
+
 $salesGrowth = pct_change($mtdNetSales, $prevNetSales);
 $orderGrowth = pct_change($mtdOrders, $prevOrders);
 $unitGrowth = pct_change($mtdUnits, $prevUnits);
@@ -776,6 +1035,14 @@ require_once __DIR__ . '/includes/header.php';
     .status-pill.high { background: rgba(239,68,68,0.12); color: #EF4444; }
     .status-pill.medium { background: rgba(245,158,11,0.15); color: #B45309; }
     .status-pill.low { background: rgba(16,185,129,0.12); color: #047857; }
+    .ok-state { display: flex; align-items: center; gap: 10px; padding: 22px 4px; color: #6B7280; font-size: 13px; }
+    .ok-state .dot { width: 10px; height: 10px; border-radius: 999px; background: #10B981; flex: 0 0 auto; }
+    .hint-icon { display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px; border-radius: 50%; background: #E5E7EB; color: #6B7280; font-size: 10px; font-weight: 700; margin-left: 6px; cursor: help; position: relative; vertical-align: middle; }
+    .hint-icon .hint-bubble { position: absolute; bottom: 130%; left: 50%; transform: translateX(-50%); background: #111827; color: #fff; padding: 8px 10px; border-radius: 6px; font-size: 11px; font-weight: 400; line-height: 1.45; white-space: normal; width: 240px; opacity: 0; visibility: hidden; transition: opacity 0.15s ease, visibility 0.15s ease; z-index: 1000; pointer-events: none; text-align: left; }
+    .hint-icon .hint-bubble::after { content: ''; position: absolute; top: 100%; left: 50%; transform: translateX(-50%); border: 5px solid transparent; border-top-color: #111827; }
+    .hint-icon:hover .hint-bubble { opacity: 1; visibility: visible; }
+    .ops-card { position: relative; }
+    .ops-card .hint-icon { position: absolute; top: 18px; right: 18px; }
     .table-note { color: #9CA3AF; font-size: 11px; margin-top: -10px; margin-bottom: 14px; }
     .product-cell { display: flex; align-items: center; gap: 12px; min-width: 260px; }
     .product-thumb-wrap { position: relative; width: 48px; height: 48px; flex: 0 0 auto; }
@@ -942,15 +1209,134 @@ require_once __DIR__ . '/includes/header.php';
         <div class="label"><?php echo htmlspecialchars(ui_text($ui, 'exception_orders')); ?></div>
         <div class="value"><?php echo number_format($cancelled + $returns + $pending); ?></div>
         <div class="note"><?php echo htmlspecialchars(ui_text($ui, 'cancelled')); ?> <?php echo number_format($cancelled); ?> | <?php echo htmlspecialchars(ui_text($ui, 'return')); ?> <?php echo number_format($returns); ?> | <?php echo htmlspecialchars(ui_text($ui, 'pending')); ?> <?php echo number_format($pending); ?></div>
+        <?php if ($excludedNet > 0): ?>
+            <div class="note"><?php echo htmlspecialchars(ui_text($ui, 'lost_revenue')); ?><?php echo hint_icon(ui_text($ui, 'tooltip_lost_revenue')); ?>: <?php echo number_format($excludedNet, 0); ?></div>
+        <?php endif; ?>
     </div>
     <div class="ops-card">
         <div class="label"><?php echo htmlspecialchars(ui_text($ui, 'low_cover_skus')); ?></div>
         <div class="value"><?php echo number_format(count($lowCoverage)); ?></div>
         <div class="note"><?php echo htmlspecialchars(ui_text($ui, 'under_14_days')); ?></div>
     </div>
+    <div class="ops-card">
+        <?php echo hint_icon(ui_text($ui, 'tooltip_projection')); ?>
+        <div class="label"><?php echo htmlspecialchars(ui_text($ui, 'projection_label')); ?></div>
+        <div class="value"><?php echo number_format($projectedMonthEnd, 0); ?></div>
+        <div class="note"><?php echo htmlspecialchars(ui_text($ui, 'projection_note')); ?></div>
+    </div>
+    <div class="ops-card">
+        <?php echo hint_icon(ui_text($ui, 'tooltip_vs_prev_month')); ?>
+        <div class="label"><?php echo htmlspecialchars(ui_text($ui, 'vs_prev_month')); ?></div>
+        <div class="value"><?php echo number_format($prevMonthActual, 0); ?></div>
+        <?php echo trend_label($projVsPrevMonth, $uiLanguage, ui_text($ui, 'vs_prev_month')); ?>
+    </div>
+    <div class="ops-card">
+        <?php echo hint_icon(ui_text($ui, 'tooltip_vs_same_month_ly')); ?>
+        <div class="label"><?php echo htmlspecialchars(ui_text($ui, 'vs_same_month_ly')); ?></div>
+        <?php if ($lyMonthHasReliableData): ?>
+            <div class="value"><?php echo number_format($lyMonthActual, 0); ?></div>
+            <?php echo trend_label($projVsLastYear, $uiLanguage, ui_text($ui, 'vs_same_month_ly')); ?>
+        <?php else: ?>
+            <div class="value">-</div>
+            <?php echo neutral_label(ui_text($ui, 'no_baseline')); ?>
+        <?php endif; ?>
+    </div>
 </div>
 
 <div class="split-grid">
+    <div class="table-card">
+        <h3><?php echo htmlspecialchars(ui_text($ui, 'cancel_watch_title')); ?><?php echo hint_icon(ui_text($ui, 'tooltip_cancel_watch')); ?></h3>
+        <div class="table-note"><?php echo htmlspecialchars(ui_text($ui, 'cancel_watch_subtitle')); ?> · <?php echo htmlspecialchars($latestCompleteDate->format('j M Y')); ?></div>
+        <?php if (empty($cancelWatch)): ?>
+            <div class="ok-state"><span class="dot"></span><?php echo htmlspecialchars(ui_text($ui, 'cancel_watch_ok')); ?></div>
+        <?php else: ?>
+            <table>
+                <thead>
+                <tr>
+                    <th><?php echo htmlspecialchars(ui_text($ui, 'platform')); ?></th>
+                    <th><?php echo htmlspecialchars(ui_text($ui, 'latest_col')); ?></th>
+                    <th><?php echo htmlspecialchars(ui_text($ui, 'norm_col')); ?></th>
+                    <th><?php echo htmlspecialchars(ui_text($ui, 'lost_revenue_col')); ?></th>
+                </tr>
+                </thead>
+                <tbody>
+                <?php foreach ($cancelWatch as $row): ?>
+                    <tr>
+                        <td><span class="badge online"><?php echo htmlspecialchars($row['shopName']); ?></span></td>
+                        <td><span class="status-pill <?php echo $row['severity']; ?>"><?php echo number_format($row['latestRate'], 1); ?>%</span></td>
+                        <td><?php echo number_format($row['normRate'], 1); ?>%</td>
+                        <td><?php echo number_format($row['lostNet'], 0); ?></td>
+                    </tr>
+                <?php endforeach; ?>
+                </tbody>
+            </table>
+        <?php endif; ?>
+    </div>
+
+    <div class="table-card">
+        <h3><?php echo htmlspecialchars(ui_text($ui, 'attention_title')); ?><?php echo hint_icon(ui_text($ui, 'tooltip_attention')); ?></h3>
+        <div class="table-note"><?php echo htmlspecialchars(ui_text($ui, 'attention_subtitle')); ?> · <?php echo htmlspecialchars($latestCompleteDate->format('j M Y')); ?></div>
+        <?php if (empty($attentionPlatforms)): ?>
+            <div class="ok-state"><span class="dot"></span><?php echo htmlspecialchars(ui_text($ui, 'attention_ok')); ?></div>
+        <?php else: ?>
+            <table>
+                <thead>
+                <tr>
+                    <th><?php echo htmlspecialchars(ui_text($ui, 'platform')); ?></th>
+                    <th><?php echo htmlspecialchars(ui_text($ui, 'latest_col')); ?></th>
+                    <th><?php echo htmlspecialchars(ui_text($ui, 'baseline_col')); ?></th>
+                    <th><?php echo htmlspecialchars(ui_text($ui, 'vs_normal_col')); ?></th>
+                    <th><?php echo htmlspecialchars(ui_text($ui, 'status_col')); ?></th>
+                </tr>
+                </thead>
+                <tbody>
+                <?php foreach ($attentionPlatforms as $row): ?>
+                    <tr>
+                        <td><span class="badge online"><?php echo htmlspecialchars($row['shopName']); ?></span></td>
+                        <td><?php echo number_format($row['latestNet'], 0); ?></td>
+                        <td><?php echo number_format($row['baseline'], 0); ?></td>
+                        <td><?php echo number_format($row['ratio'], 0); ?>%</td>
+                        <td><span class="status-pill <?php echo $row['status'] === 'no_sales' ? 'high' : 'medium'; ?>"><?php echo htmlspecialchars(ui_text($ui, $row['status'] === 'no_sales' ? 'status_no_sales' : 'status_below')); ?></span></td>
+                    </tr>
+                <?php endforeach; ?>
+                </tbody>
+            </table>
+        <?php endif; ?>
+    </div>
+</div>
+
+<div class="split-grid">
+    <div class="table-card">
+        <h3><?php echo htmlspecialchars(ui_text($ui, 'disc_anomaly_title')); ?><?php echo hint_icon(ui_text($ui, 'tooltip_disc_anomaly')); ?></h3>
+        <div class="table-note"><?php echo htmlspecialchars(ui_text($ui, 'disc_anomaly_subtitle')); ?> · <?php echo htmlspecialchars($latestCompleteDate->format('j M Y')); ?></div>
+        <?php if (empty($discountAnomalies)): ?>
+            <div class="ok-state"><span class="dot"></span><?php echo htmlspecialchars(ui_text($ui, 'disc_anomaly_ok')); ?></div>
+        <?php else: ?>
+            <table>
+                <thead>
+                <tr>
+                    <th><?php echo htmlspecialchars(ui_text($ui, 'platform')); ?></th>
+                    <th><?php echo htmlspecialchars(ui_text($ui, 'disc_latest_col')); ?></th>
+                    <th><?php echo htmlspecialchars(ui_text($ui, 'disc_norm_col')); ?></th>
+                    <th><?php echo htmlspecialchars(ui_text($ui, 'disc_diff_col')); ?></th>
+                    <th><?php echo htmlspecialchars(ui_text($ui, 'gross_col')); ?></th>
+                </tr>
+                </thead>
+                <tbody>
+                <?php foreach ($discountAnomalies as $row): ?>
+                    <tr>
+                        <td><span class="badge online"><?php echo htmlspecialchars($row['shopName']); ?></span></td>
+                        <td><span class="status-pill medium"><?php echo number_format($row['latestPct'], 1); ?>%</span></td>
+                        <td><?php echo number_format($row['normPct'], 1); ?>%</td>
+                        <td>+<?php echo number_format($row['diff'], 1); ?>pp</td>
+                        <td><?php echo number_format($row['gross'], 0); ?></td>
+                    </tr>
+                <?php endforeach; ?>
+                </tbody>
+            </table>
+        <?php endif; ?>
+    </div>
+
     <div class="table-card">
         <h3><?php echo htmlspecialchars(ui_text($ui, 'stock_coverage')); ?></h3>
         <table>
@@ -959,7 +1345,7 @@ require_once __DIR__ . '/includes/header.php';
                 <th><?php echo htmlspecialchars(ui_text($ui, 'product')); ?></th>
                 <th><?php echo htmlspecialchars(ui_text($ui, 'sales')); ?></th>
                 <th><?php echo htmlspecialchars(ui_text($ui, 'stock')); ?></th>
-                <th><?php echo htmlspecialchars(ui_text($ui, 'cover')); ?></th>
+                <th><?php echo htmlspecialchars(ui_text($ui, 'cover')); ?><?php echo hint_icon(ui_text($ui, 'tooltip_cover')); ?></th>
             </tr>
             </thead>
             <tbody>
@@ -977,13 +1363,21 @@ require_once __DIR__ . '/includes/header.php';
                     </td>
                     <td><?php echo number_format(n($row['netSales']), 0); ?></td>
                     <td><?php echo number_format(n($row['availableQty']), 0); ?></td>
-                    <td><span class="status-pill <?php echo $cover < 14 ? 'high' : ($cover < 21 ? 'medium' : 'low'); ?>"><?php echo number_format($cover, 1); ?> <?php echo htmlspecialchars(ui_text($ui, 'days')); ?></span></td>
+                    <td>
+                        <?php if (n($row['availableQty']) <= 0): ?>
+                            <span class="status-pill high"><?php echo htmlspecialchars(ui_text($ui, 'out_of_stock')); ?></span>
+                        <?php else: ?>
+                            <span class="status-pill <?php echo $cover < 14 ? 'high' : ($cover < 21 ? 'medium' : 'low'); ?>"><?php echo number_format($cover, 1); ?> <?php echo htmlspecialchars(ui_text($ui, 'days')); ?></span>
+                        <?php endif; ?>
+                    </td>
                 </tr>
             <?php endforeach; ?>
             </tbody>
         </table>
     </div>
+</div>
 
+<div class="split-grid">
     <div class="table-card">
         <h3><?php echo htmlspecialchars(ui_text($ui, 'after_sales_queue')); ?></h3>
         <table>
