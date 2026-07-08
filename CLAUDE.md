@@ -18,19 +18,28 @@ Each dashboard is a single self-contained PHP file that: starts a session, requi
 
 | Page | File | Data status | DB target |
 |---|---|---|---|
-| Overview | `index.php` | Mock data (`$mockData` array) | connects via `database.php` |
-| Online Sales | `dashboard_online.php` | **Real data** — only page wired to production | own inline connection to `production_jst_api` |
+| Overview | `index.php` | **Partially real** — Online/Offline real (`fact_online_orders`, `FactSales`), Consignment mock | connects via `database.php` (`all_report`) |
+| Online Sales | `dashboard_online.php` | **Real data** — reads `fact_online_orders`/`fact_online_order_items` | connects via `database.php` (`all_report`) |
 | Offline Sales | `dashboard_offline.php` | Mock data | connects via `database.php` |
-| Consignment | `dashboard_consignment.php` | Mock data | connects via `database.php` |
+| Consignment | `dashboard_consignment.php` | Mock data — no real consignment sales source exists yet | connects via `database.php` |
 
-`dashboard_online.php` is the reference implementation for what "real" pages should look like — read it before wiring up Offline/Consignment to real data.
+`dashboard_online.php` is the reference implementation for what "real" pages should look like — read it before wiring up Offline/Consignment to real data. `index.php` still keeps the `$mockData` array shape/name but assembles most of it from real queries now — see `SYSTEM_MAP.md`'s Overview section for exactly which keys are real vs mock.
 
-### Two separate DB connections exist
+### All dashboards now share one database
 
-- `database.php` — connects to `all_report` database on `203.154.130.236` (server `sa`/`Journal@25`). Used by `index.php`, `dashboard_offline.php`, `dashboard_consignment.php`, and the import scripts.
-- `dashboard_online.php` — opens its **own** inline connection (not via `database.php`) to `203.154.130.236,1433`, database `production_jst_api`. This is intentional: Online reads live production sales data (`dbo.OrderSummary` and related views), a different database than the other pages.
+All four pages (`index.php`, `dashboard_online.php`, `dashboard_offline.php`,
+`dashboard_consignment.php`) connect to the `all_report` database on
+`203.154.130.236` (server `sa`/`Journal@25`) via `database.php`. Credentials are
+hardcoded there — there is no `.env`/config abstraction.
 
-Credentials are hardcoded in both places — there is no `.env`/config abstraction. Don't try to unify the connections without checking with the user first; the databases genuinely differ.
+`dashboard_online.php` previously opened its own inline connection to a separate
+`production_jst_api` database (`dbo.OrderSummary` and related views) for live
+production data. Once the ETL team finished loading Online sales into `all_report`
+as a proper star schema (`fact_online_orders`/`fact_online_order_items` +
+`DimOnlinePlatform`/`DimOnlineProduct`/etc.), the dashboard was migrated onto that —
+see `SYSTEM_MAP.md` for the full mapping and known data-quality gaps in the new
+source (some old columns, e.g. payment method and per-item discount, aren't
+populated by this ETL; a few sections were dropped as a result).
 
 ### `includes/header.php` is the shared shell
 
@@ -38,25 +47,24 @@ Set these variables before `require`-ing it: `$pageTitle`, `$pageSubtitle`, `$ac
 
 ### Target/KPI logic (Online dashboard)
 
-There is no target table — targets are always derived from a **previous period baseline** (previous month for MTD, previous year for YTD, previous full month for the monthly target), not a real business target. "Today" means "latest date present in `OrderSummary`," not the actual calendar date — if data import lags, the whole dashboard's date window shifts with it. Every KPI section follows the actual/target/variance/achievement pattern; see `SYSTEM_MAP.md` for the full KPI-to-query mapping and known data-quality risks (e.g. product/payment grouping is done via `LIKE` pattern matching on free-text columns, not real categories).
+There is no target table — targets are always derived from a **previous period baseline** (previous month for MTD, previous year for YTD, previous full month for the monthly target), not a real business target. "Today" means "latest date present in `fact_online_orders`," not the actual calendar date — if the ETL lags, the whole dashboard's date window shifts with it. Every KPI section follows the actual/target/variance/achievement pattern; see `SYSTEM_MAP.md` for the full KPI-to-query mapping and known data-quality risks (e.g. product grouping is done via `LIKE` pattern matching on free-text columns, not real categories; several old columns like payment method and per-item discount aren't populated by this ETL at all).
 
 ### CSV import scripts
 
-`scripts/import.jst.php` and `scripts/import_ada.php` are standalone upload-and-import endpoints (POST a CSV via `$_FILES['csv_file']`), sharing `scripts/helpers.php` for encoding normalization (`convertToUtf8`, BOM stripping), date parsing (`convertDate`/`convertDateTime`), value cleaning (`cleanNumber`/`cleanString`), and bulk insert helpers. These write into the `all_report` database via `database.php`, separate from the live `production_jst_api` source that `dashboard_online.php` reads.
+`scripts/import.jst.php` and `scripts/import_ada.php` are standalone upload-and-import endpoints (POST a CSV via `$_FILES['csv_file']`), sharing `scripts/helpers.php` for encoding normalization (`convertToUtf8`, BOM stripping), date parsing (`convertDate`/`convertDateTime`), value cleaning (`cleanNumber`/`cleanString`), and bulk insert helpers. These write into `jst_sale_detail`/`pos_sale_detail` in the `all_report` database — legacy/unused tables, currently empty, unrelated to the `fact_online_orders`/`fact_online_order_items` tables `dashboard_online.php` actually reads (those are populated by a separate ETL process, not these scripts).
 
 ## Product/design intent
 
-Three docs define *why* the dashboard is shaped the way it is — read them before changing layout, adding KPIs, or introducing new charts:
+Two docs define *why* the dashboard is shaped the way it is — read them before changing layout, adding KPIs, or introducing new charts:
 
-- **`DASHBOARD.MD`** — core philosophy: Actual vs Target is the default framing for every KPI (actual, target, variance, achievement, trend); summary-before-detail drill-down (Overview → Channel → Analysis → Transaction); charts must answer a specific business question, not just exist; status indicators must never rely on color alone (pair with label/icon/number).
 - **`PRODUCT.md`** — audience is executives/managers/operations with different needs (company-wide status vs channel diagnosis vs near-real-time execution signals); brand tone is professional/clean/fast, explicitly not "colorful," "chart-heavy," or "decorative."
-- **`SYSTEM_MAP.md`** — current-state map of the Online dashboard only (by design, doesn't cover Offline/Consignment/Overview since those are still mock data). Documents every KPI's query source, the reused tables/views (`dbo.OrderSummary`, `dbo.GetItemSkus`, `dbo.GetWarehouseSkuInventorys`, `dbo.GetAfterSaleOrders`), and a "Known Data Risks" table — check this before trusting a KPI's business meaning.
+- **`SYSTEM_MAP.md`** — current-state map of the dashboards wired to real data: `dashboard_online.php` and the Online/Offline portions of `index.php` (Consignment/`dashboard_offline.php`/`dashboard_consignment.php` are covered by their own inline code comments instead). Documents every KPI's query source, the reused tables (`fact_online_orders`, `fact_online_order_items`, `DimOnlineProduct`, `FactSales`, `DimBranch`, `DimProduct`), and a "Known Data Risks" table — check this before trusting a KPI's business meaning.
 
-`SQL_QUERIES.md` documents an earlier/alternate schema (`jst_sale_detail`, `pos_sale_detail`) that does **not** match the tables actually queried in the current code (`dbo.OrderSummary` etc. in `production_jst_api`) — treat it as historical reference, not ground truth; trust the live SQL in `dashboard_online.php` and `SYSTEM_MAP.md` over it.
+(A `DASHBOARD.MD` covering the Actual-vs-Target/drill-down philosophy and a `SQL_QUERIES.md` covering an older schema were referenced here previously but no longer exist in the repo — if you need that context, check git history.)
 
 ## Conventions to follow
 
 - New dashboard pages should follow the existing pattern: own connection setup → `$mockData` (until wired to real data) → set header vars → `require includes/header.php` → query/render → `require includes/footer.php`.
 - UI strings that need Thai/English support go through the `$headerText`/`$translations` array pattern already used in `header.php` and `dashboard_online.php`, keyed by `$uiLanguage`.
-- SQL is written as raw parameterized `sqlsrv_query` calls (see `fetch_one`/`fetch_all` in `database.php` and the `append_filter`/`params_for_periods` helpers in `dashboard_online.php`) — there is no query builder or ORM.
-- When adding a KPI, follow the actual/target/variance/achievement/trend shape described in `DASHBOARD.MD`, and update `SYSTEM_MAP.md`'s KPI table if you're changing the Online dashboard's real queries.
+- SQL is written as raw parameterized `sqlsrv_query` calls (see `fetch_one`/`fetch_all` and the `append_filter` helper, duplicated per-file in `dashboard_online.php`/`dashboard_offline.php`/`index.php` — `index.php` also duplicates `RETAIL_BRANCH_SQL`/`SELLABLE_PRODUCT_SQL`/`zone_case_sql()` from `dashboard_offline.php` and the `item_agg` CTE pattern from `dashboard_online.php`) — there is no query builder or ORM.
+- When adding a KPI, follow the actual/target/variance/achievement/trend shape, and update `SYSTEM_MAP.md`'s KPI table if you're changing the Online dashboard's real queries.

@@ -11,164 +11,562 @@ if (!$conn) {
     die("Connection failed: " . print_r(sqlsrv_errors(), true));
 }
 
-// Mock data for dashboard (จะแทนที่ด้วย query จริงเมื่อมีข้อมูล)
+function fetch_one($conn, string $sql, array $params = []): array
+{
+    $stmt = sqlsrv_query($conn, $sql, $params);
+    if ($stmt === false) {
+        throw new RuntimeException(print_r(sqlsrv_errors(), true));
+    }
+    $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC) ?: [];
+    sqlsrv_free_stmt($stmt);
+    return $row;
+}
+
+function fetch_all($conn, string $sql, array $params = []): array
+{
+    $stmt = sqlsrv_query($conn, $sql, $params);
+    if ($stmt === false) {
+        throw new RuntimeException(print_r(sqlsrv_errors(), true));
+    }
+    $rows = [];
+    while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
+        $rows[] = $row;
+    }
+    sqlsrv_free_stmt($stmt);
+    return $rows;
+}
+
+function n($value): float
+{
+    return is_numeric($value) ? (float) $value : 0.0;
+}
+
+function pct_change(float $current, float $previous): float
+{
+    return $previous == 0.0 ? 0.0 : (($current - $previous) / $previous) * 100.0;
+}
+
+function request_value(string $key, string $default, array $allowed): string
+{
+    $value = isset($_GET[$key]) ? (string) $_GET[$key] : $default;
+    return in_array($value, $allowed, true) ? $value : $default;
+}
+
+// includes/header.php always renders a Date Range dropdown (today/mtd/ytd) with its
+// own defaults, regardless of whether the page wires it up — this reads the actual
+// selection so the KPI cards/tables below (and the dropdown's own "selected" state)
+// respect it, instead of always showing a hardcoded current month.
+$filterValues = [
+    'date_range' => request_value('date_range', 'mtd', ['today', 'mtd', 'ytd']),
+];
+
+/**
+ * Retail branch scope, copied verbatim from dashboard_offline.php: FactSales only
+ * ever carries rows for physical "Journal <mall>" POS branches (warehouses/
+ * consignment/HQ/online never post sales lines here), except "Journal Online" which
+ * belongs on the Online dashboard instead.
+ */
+const RETAIL_BRANCH_SQL = "b.BranchName LIKE 'Journal %' AND b.BranchName <> 'Journal Online'";
+/** DimProduct.ProductGroup separates real merchandise from gift/sample/packaging lines. */
+const SELLABLE_PRODUCT_SQL = "p.ProductGroup = 'FINISH GOOD'";
+
+/**
+ * Region grouping is inferred from branch name (no region column exists on DimBranch),
+ * copied verbatim from dashboard_offline.php. Heuristic, not a verified operational
+ * hierarchy — treat as a rough view only.
+ */
+function zone_case_sql(string $branchCol = 'b.BranchName'): string
+{
+    return "CASE
+            WHEN {$branchCol} LIKE '%Chiangmai%' OR {$branchCol} LIKE '%Chiang Mai%' OR {$branchCol} LIKE '%MAYA%' OR {$branchCol} LIKE '%Nimman%' THEN 'North'
+            WHEN {$branchCol} LIKE '%Phuket%' OR {$branchCol} LIKE '%Hatyai%' THEN 'South'
+            WHEN {$branchCol} LIKE '%Pattaya%' OR {$branchCol} LIKE '%Chonburi%' THEN 'East'
+            WHEN {$branchCol} LIKE '%Udon%' OR {$branchCol} LIKE '%Khonkaen%' THEN 'Northeast'
+            ELSE 'Bangkok & Metro'
+        END";
+}
+
+/** Growth-baseline reliability cutoff for Online data, same constant as dashboard_online.php. */
+const ONLINE_RELIABLE_DATA_FROM = '2025-12-01';
+
+// ---------------------------------------------------------------------------
+// Real Online aggregates (fact_online_orders / fact_online_order_items)
+// ---------------------------------------------------------------------------
+
+$onlineDateInfo = fetch_one($conn, "
+    SELECT CAST(MAX(order_datetime) AS date) AS maxDate
+    FROM fact_online_orders
+");
+$onlineMaxDate = $onlineDateInfo['maxDate'] ?? new DateTime();
+$onlineMtdStart = new DateTime($onlineMaxDate->format('Y-m-01'));
+$onlineMtdEnd = (clone $onlineMtdStart)->modify('+1 month');
+$onlinePrevMonthStart = (clone $onlineMtdStart)->modify('-1 month');
+$onlineYearStart = new DateTime($onlineMaxDate->format('Y-01-01'));
+
+/**
+ * The KPI cards/platform/branch/top-product sections below all use this
+ * date_range-driven window (today/mtd/ytd), same three options as the Online/Offline
+ * dashboards. Trend charts and the Annual Goal card intentionally stay unaffected —
+ * see their own comments below.
+ */
+if ($filterValues['date_range'] === 'today') {
+    $onlinePeriodStart = clone $onlineMaxDate;
+    $onlinePeriodEnd = (clone $onlineMaxDate)->modify('+1 day');
+    $onlineTargetStart = (clone $onlinePeriodStart)->modify('-1 day');
+    $onlineTargetEnd = (clone $onlinePeriodEnd)->modify('-1 day');
+} elseif ($filterValues['date_range'] === 'ytd') {
+    $onlinePeriodStart = clone $onlineYearStart;
+    $onlinePeriodEnd = clone $onlineMtdEnd;
+    $onlineTargetStart = (clone $onlineYearStart)->modify('-1 year');
+    $onlineTargetEnd = (clone $onlineMtdEnd)->modify('-1 year');
+} else {
+    $onlinePeriodStart = clone $onlineMtdStart;
+    $onlinePeriodEnd = clone $onlineMtdEnd;
+    $onlineTargetStart = clone $onlinePrevMonthStart;
+    $onlineTargetEnd = clone $onlineMtdStart;
+}
+
+/**
+ * Item-grain aggregate joined 1:1 per order (order_key is unique per row here), so
+ * joining it into fact_online_orders never fans out header fields. line_total sums
+ * reliably to total_amount (verified against dashboard_online.php); unit_price = 0
+ * excludes gift/free lines from unit counts, matching the same default behavior used
+ * on the Online dashboard (see SYSTEM_MAP.md Known Data Risks).
+ */
+const ONLINE_ITEM_AGG_CTE = "item_agg AS (
+        SELECT i.order_key, SUM(i.quantity) AS units, SUM(i.line_total) AS netSales
+        FROM fact_online_order_items i
+        WHERE i.unit_price <> 0
+        GROUP BY i.order_key
+    )";
+const ONLINE_VALID_SALES_SQL = " AND o.order_status NOT IN ('Cancelled', 'Return')";
+
+$onlineSummaryRows = fetch_all($conn, "
+    WITH " . ONLINE_ITEM_AGG_CTE . "
+    SELECT 'current' AS period, COUNT(DISTINCT o.order_key) AS orders, SUM(ia.units) AS units, SUM(ia.netSales) AS netSales
+    FROM fact_online_orders o JOIN item_agg ia ON ia.order_key = o.order_key
+    WHERE o.order_datetime >= ? AND o.order_datetime < ?" . ONLINE_VALID_SALES_SQL . "
+
+    UNION ALL
+
+    SELECT 'prev' AS period, COUNT(DISTINCT o.order_key) AS orders, SUM(ia.units) AS units, SUM(ia.netSales) AS netSales
+    FROM fact_online_orders o JOIN item_agg ia ON ia.order_key = o.order_key
+    WHERE o.order_datetime >= ? AND o.order_datetime < ?" . ONLINE_VALID_SALES_SQL . "
+
+    UNION ALL
+
+    SELECT 'ytd' AS period, COUNT(DISTINCT o.order_key) AS orders, SUM(ia.units) AS units, SUM(ia.netSales) AS netSales
+    FROM fact_online_orders o JOIN item_agg ia ON ia.order_key = o.order_key
+    WHERE o.order_datetime >= ? AND o.order_datetime < ?" . ONLINE_VALID_SALES_SQL . "
+
+    UNION ALL
+
+    SELECT 'month' AS period, COUNT(DISTINCT o.order_key) AS orders, SUM(ia.units) AS units, SUM(ia.netSales) AS netSales
+    FROM fact_online_orders o JOIN item_agg ia ON ia.order_key = o.order_key
+    WHERE o.order_datetime >= ? AND o.order_datetime < ?" . ONLINE_VALID_SALES_SQL . "
+
+    UNION ALL
+
+    SELECT 'prev_month' AS period, COUNT(DISTINCT o.order_key) AS orders, SUM(ia.units) AS units, SUM(ia.netSales) AS netSales
+    FROM fact_online_orders o JOIN item_agg ia ON ia.order_key = o.order_key
+    WHERE o.order_datetime >= ? AND o.order_datetime < ?" . ONLINE_VALID_SALES_SQL . ";
+", [
+    $onlinePeriodStart->format('Y-m-d'), $onlinePeriodEnd->format('Y-m-d'),
+    $onlineTargetStart->format('Y-m-d'), $onlineTargetEnd->format('Y-m-d'),
+    $onlineYearStart->format('Y-m-d'), $onlineMtdEnd->format('Y-m-d'), // 'ytd' branch always true YTD, feeds goal.currentYear regardless of the filter
+    $onlineMtdStart->format('Y-m-d'), $onlineMtdEnd->format('Y-m-d'), // 'month'/'prev_month' always true calendar month, feeds Monthly Target Progress regardless of the filter
+    $onlinePrevMonthStart->format('Y-m-d'), $onlineMtdStart->format('Y-m-d'),
+]);
+$onlineSummary = ['current' => [], 'prev' => [], 'ytd' => [], 'month' => [], 'prev_month' => []];
+foreach ($onlineSummaryRows as $row) {
+    $onlineSummary[$row['period']] = $row;
+}
+$onlineNetSales = n($onlineSummary['current']['netSales'] ?? 0);
+$onlinePrevNetSales = n($onlineSummary['prev']['netSales'] ?? 0);
+$onlineYtdNetSales = n($onlineSummary['ytd']['netSales'] ?? 0);
+$onlineMonthActual = n($onlineSummary['month']['netSales'] ?? 0);
+$onlineMonthPrevActual = n($onlineSummary['prev_month']['netSales'] ?? 0);
+$onlineOrders = (int) n($onlineSummary['current']['orders'] ?? 0);
+$onlineUnits = n($onlineSummary['current']['units'] ?? 0);
+/**
+ * YTD's baseline (same window last year) lands before ONLINE_RELIABLE_DATA_FROM,
+ * where real volume is near-zero (see dashboard_online.php's own baseline-reliability
+ * gate) — a % against that reads as noise (e.g. +3,900,000%). Suppress rather than
+ * show a misleading number.
+ */
+$onlineBaselineReliable = $onlineTargetStart->format('Y-m-d') >= ONLINE_RELIABLE_DATA_FROM;
+$onlineGrowth = $onlineBaselineReliable ? pct_change($onlineNetSales, $onlinePrevNetSales) : 0.0;
+
+$onlinePlatformCurrentRows = fetch_all($conn, "
+    WITH " . ONLINE_ITEM_AGG_CTE . "
+    SELECT o.platform, COUNT(DISTINCT o.order_key) AS orders, SUM(ia.units) AS units, SUM(ia.netSales) AS netSales
+    FROM fact_online_orders o JOIN item_agg ia ON ia.order_key = o.order_key
+    WHERE o.order_datetime >= ? AND o.order_datetime < ?" . ONLINE_VALID_SALES_SQL . "
+    GROUP BY o.platform
+    ORDER BY netSales DESC;
+", [$onlinePeriodStart->format('Y-m-d'), $onlinePeriodEnd->format('Y-m-d')]);
+$onlinePlatformPrevRows = fetch_all($conn, "
+    WITH " . ONLINE_ITEM_AGG_CTE . "
+    SELECT o.platform, SUM(ia.netSales) AS netSales
+    FROM fact_online_orders o JOIN item_agg ia ON ia.order_key = o.order_key
+    WHERE o.order_datetime >= ? AND o.order_datetime < ?" . ONLINE_VALID_SALES_SQL . "
+    GROUP BY o.platform;
+", [$onlineTargetStart->format('Y-m-d'), $onlineTargetEnd->format('Y-m-d')]);
+$onlinePlatformPrevByName = [];
+foreach ($onlinePlatformPrevRows as $row) {
+    $onlinePlatformPrevByName[$row['platform']] = n($row['netSales']);
+}
+$onlinePlatforms = [];
+foreach ($onlinePlatformCurrentRows as $row) {
+    $prevNet = $onlinePlatformPrevByName[$row['platform']] ?? 0.0;
+    $onlinePlatforms[] = [
+        'name' => (string) $row['platform'],
+        'channel' => (string) $row['platform'],
+        'sales' => n($row['netSales']),
+        'orders' => (int) n($row['orders']),
+        'units' => n($row['units']),
+        'growth' => $onlineBaselineReliable ? round(pct_change(n($row['netSales']), $prevNet), 1) : 0.0,
+    ];
+}
+
+$onlineTopProductRows = fetch_all($conn, "
+    WITH top5 AS (
+        SELECT TOP 5 i.product_key, i.product_name AS productName,
+            SUM(i.quantity) AS units, SUM(i.line_total) AS netSales
+        FROM fact_online_orders o
+        JOIN fact_online_order_items i ON i.order_key = o.order_key
+        WHERE o.order_datetime >= ? AND o.order_datetime < ?" . ONLINE_VALID_SALES_SQL . " AND i.unit_price <> 0
+        GROUP BY i.product_key, i.product_name
+        ORDER BY netSales DESC
+    ),
+    item_sku AS (
+        SELECT product_key, MAX(NULLIF(sku_code, '')) AS itemSku
+        FROM fact_online_order_items
+        GROUP BY product_key
+    )
+    SELECT t.product_key, t.productName, t.units, t.netSales,
+        COALESCE(NULLIF(p.sku_code, ''), s.itemSku) AS sku
+    FROM top5 t
+    LEFT JOIN DimOnlineProduct p ON p.product_key = t.product_key
+    LEFT JOIN item_sku s ON s.product_key = t.product_key
+    ORDER BY t.netSales DESC;
+", [$onlinePeriodStart->format('Y-m-d'), $onlinePeriodEnd->format('Y-m-d')]);
+
+$onlineTopProductKeys = array_column($onlineTopProductRows, 'product_key');
+$onlineTopProductChannels = [];
+if (!empty($onlineTopProductKeys)) {
+    $placeholders = implode(',', array_fill(0, count($onlineTopProductKeys), '?'));
+    $channelRows = fetch_all($conn, "
+        SELECT i.product_key, o.platform, SUM(i.line_total) AS netSales
+        FROM fact_online_orders o
+        JOIN fact_online_order_items i ON i.order_key = o.order_key
+        WHERE o.order_datetime >= ? AND o.order_datetime < ?" . ONLINE_VALID_SALES_SQL . "
+          AND i.unit_price <> 0 AND i.product_key IN ({$placeholders})
+        GROUP BY i.product_key, o.platform;
+    ", array_merge([$onlinePeriodStart->format('Y-m-d'), $onlinePeriodEnd->format('Y-m-d')], $onlineTopProductKeys));
+    foreach ($channelRows as $row) {
+        $onlineTopProductChannels[$row['product_key']][$row['platform']] = n($row['netSales']);
+    }
+}
+
+// Last 12 real months, by platform (for the Monthly Trend chart's channel breakdown)
+$trendMonthsBack = 11;
+$onlineTrendStart = (clone $onlineMtdStart)->modify("-{$trendMonthsBack} months");
+$onlineTrendRows = fetch_all($conn, "
+    WITH " . ONLINE_ITEM_AGG_CTE . "
+    SELECT FORMAT(o.order_datetime, 'yyyy-MM') AS ym, o.platform, SUM(ia.netSales) AS netSales
+    FROM fact_online_orders o JOIN item_agg ia ON ia.order_key = o.order_key
+    WHERE o.order_datetime >= ? AND o.order_datetime < ?" . ONLINE_VALID_SALES_SQL . "
+    GROUP BY FORMAT(o.order_datetime, 'yyyy-MM'), o.platform;
+", [$onlineTrendStart->format('Y-m-d'), $onlineMtdEnd->format('Y-m-d')]);
+$onlineTrendByMonth = [];
+foreach ($onlineTrendRows as $row) {
+    $onlineTrendByMonth[$row['ym']][$row['platform']] = n($row['netSales']);
+}
+
+// ---------------------------------------------------------------------------
+// Real Offline aggregates (FactSales / DimBranch / DimProduct)
+// ---------------------------------------------------------------------------
+
+$offlineDateInfo = fetch_one($conn, "
+    SELECT MAX(f.DateKey) AS maxDateKey
+    FROM FactSales f JOIN DimBranch b ON f.BranchKey = b.BranchKey
+    WHERE " . RETAIL_BRANCH_SQL . "
+");
+$offlineMaxDateKeyInt = (int) ($offlineDateInfo['maxDateKey'] ?? (int) date('Ymd'));
+$offlineMaxDate = DateTime::createFromFormat('Ymd', (string) $offlineMaxDateKeyInt) ?: new DateTime();
+$offlineMtdStart = new DateTime($offlineMaxDate->format('Y-m-01'));
+$offlineMtdEnd = (clone $offlineMtdStart)->modify('+1 month');
+$offlinePrevMonthStart = (clone $offlineMtdStart)->modify('-1 month');
+$offlineYearStart = new DateTime($offlineMaxDate->format('Y-01-01'));
+$offlineMtdStartKey = (int) $offlineMtdStart->format('Ymd');
+$offlineMtdEndKey = (int) $offlineMtdEnd->format('Ymd');
+$offlinePrevMonthStartKey = (int) $offlinePrevMonthStart->format('Ymd');
+$offlineYearStartKey = (int) $offlineYearStart->format('Ymd');
+
+// Same date_range-driven window as Online, expressed as DateKey ints (FactSales' key).
+if ($filterValues['date_range'] === 'today') {
+    $offlinePeriodStartKey = $offlineMaxDateKeyInt;
+    $offlinePeriodEndKey = (int) (clone $offlineMaxDate)->modify('+1 day')->format('Ymd');
+    $offlineTargetStartKey = (int) (clone $offlineMaxDate)->modify('-1 day')->format('Ymd');
+    $offlineTargetEndKey = $offlineMaxDateKeyInt;
+} elseif ($filterValues['date_range'] === 'ytd') {
+    $offlinePeriodStartKey = $offlineYearStartKey;
+    $offlinePeriodEndKey = $offlineMtdEndKey;
+    $offlineTargetStartKey = (int) (clone $offlineYearStart)->modify('-1 year')->format('Ymd');
+    $offlineTargetEndKey = (int) (clone $offlineMtdEnd)->modify('-1 year')->format('Ymd');
+} else {
+    $offlinePeriodStartKey = $offlineMtdStartKey;
+    $offlinePeriodEndKey = $offlineMtdEndKey;
+    $offlineTargetStartKey = $offlinePrevMonthStartKey;
+    $offlineTargetEndKey = $offlineMtdStartKey;
+}
+
+$offlineSummaryRows = fetch_all($conn, "
+    SELECT 'current' AS period, COUNT(DISTINCT f.SourceDocNo) AS orders, SUM(f.Quantity) AS units, SUM(f.NetTotal) AS netSales
+    FROM FactSales f JOIN DimBranch b ON f.BranchKey = b.BranchKey JOIN DimProduct p ON f.ProductKey = p.ProductKey
+    WHERE f.DateKey >= {$offlinePeriodStartKey} AND f.DateKey < {$offlinePeriodEndKey} AND " . RETAIL_BRANCH_SQL . " AND " . SELLABLE_PRODUCT_SQL . "
+
+    UNION ALL
+
+    SELECT 'prev' AS period, COUNT(DISTINCT f.SourceDocNo) AS orders, SUM(f.Quantity) AS units, SUM(f.NetTotal) AS netSales
+    FROM FactSales f JOIN DimBranch b ON f.BranchKey = b.BranchKey JOIN DimProduct p ON f.ProductKey = p.ProductKey
+    WHERE f.DateKey >= {$offlineTargetStartKey} AND f.DateKey < {$offlineTargetEndKey} AND " . RETAIL_BRANCH_SQL . " AND " . SELLABLE_PRODUCT_SQL . "
+
+    UNION ALL
+
+    SELECT 'ytd' AS period, COUNT(DISTINCT f.SourceDocNo) AS orders, SUM(f.Quantity) AS units, SUM(f.NetTotal) AS netSales
+    FROM FactSales f JOIN DimBranch b ON f.BranchKey = b.BranchKey JOIN DimProduct p ON f.ProductKey = p.ProductKey
+    WHERE f.DateKey >= {$offlineYearStartKey} AND f.DateKey < {$offlineMtdEndKey} AND " . RETAIL_BRANCH_SQL . " AND " . SELLABLE_PRODUCT_SQL . "
+
+    UNION ALL
+
+    SELECT 'month' AS period, COUNT(DISTINCT f.SourceDocNo) AS orders, SUM(f.Quantity) AS units, SUM(f.NetTotal) AS netSales
+    FROM FactSales f JOIN DimBranch b ON f.BranchKey = b.BranchKey JOIN DimProduct p ON f.ProductKey = p.ProductKey
+    WHERE f.DateKey >= {$offlineMtdStartKey} AND f.DateKey < {$offlineMtdEndKey} AND " . RETAIL_BRANCH_SQL . " AND " . SELLABLE_PRODUCT_SQL . "
+
+    UNION ALL
+
+    SELECT 'prev_month' AS period, COUNT(DISTINCT f.SourceDocNo) AS orders, SUM(f.Quantity) AS units, SUM(f.NetTotal) AS netSales
+    FROM FactSales f JOIN DimBranch b ON f.BranchKey = b.BranchKey JOIN DimProduct p ON f.ProductKey = p.ProductKey
+    WHERE f.DateKey >= {$offlinePrevMonthStartKey} AND f.DateKey < {$offlineMtdStartKey} AND " . RETAIL_BRANCH_SQL . " AND " . SELLABLE_PRODUCT_SQL . ";
+");
+$offlineSummary = ['current' => [], 'prev' => [], 'ytd' => [], 'month' => [], 'prev_month' => []];
+foreach ($offlineSummaryRows as $row) {
+    $offlineSummary[$row['period']] = $row;
+}
+$offlineNetSales = n($offlineSummary['current']['netSales'] ?? 0);
+$offlinePrevNetSales = n($offlineSummary['prev']['netSales'] ?? 0);
+$offlineYtdNetSales = n($offlineSummary['ytd']['netSales'] ?? 0);
+$offlineMonthActual = n($offlineSummary['month']['netSales'] ?? 0);
+$offlineMonthPrevActual = n($offlineSummary['prev_month']['netSales'] ?? 0);
+$offlineOrders = (int) n($offlineSummary['current']['orders'] ?? 0);
+$offlineUnits = n($offlineSummary['current']['units'] ?? 0);
+$offlineGrowth = pct_change($offlineNetSales, $offlinePrevNetSales);
+
+$offlineBranchRows = fetch_all($conn, "
+    SELECT b.BranchName, COUNT(DISTINCT f.SourceDocNo) AS orders, SUM(f.NetTotal) AS netSales
+    FROM FactSales f JOIN DimBranch b ON f.BranchKey = b.BranchKey JOIN DimProduct p ON f.ProductKey = p.ProductKey
+    WHERE f.DateKey >= {$offlinePeriodStartKey} AND f.DateKey < {$offlinePeriodEndKey} AND " . RETAIL_BRANCH_SQL . " AND " . SELLABLE_PRODUCT_SQL . "
+    GROUP BY b.BranchName
+    ORDER BY netSales DESC;
+");
+
+$offlineZoneRows = fetch_all($conn, "
+    SELECT " . zone_case_sql() . " AS zone, SUM(f.NetTotal) AS netSales
+    FROM FactSales f JOIN DimBranch b ON f.BranchKey = b.BranchKey JOIN DimProduct p ON f.ProductKey = p.ProductKey
+    WHERE f.DateKey >= {$offlinePeriodStartKey} AND f.DateKey < {$offlinePeriodEndKey} AND " . RETAIL_BRANCH_SQL . " AND " . SELLABLE_PRODUCT_SQL . "
+    GROUP BY " . zone_case_sql() . ";
+");
+
+$offlineTopProductRows = fetch_all($conn, "
+    SELECT TOP 5 p.ProductCode, p.ProductName, SUM(f.Quantity) AS units, SUM(f.NetTotal) AS netSales
+    FROM FactSales f JOIN DimBranch b ON f.BranchKey = b.BranchKey JOIN DimProduct p ON f.ProductKey = p.ProductKey
+    WHERE f.DateKey >= {$offlinePeriodStartKey} AND f.DateKey < {$offlinePeriodEndKey} AND " . RETAIL_BRANCH_SQL . " AND " . SELLABLE_PRODUCT_SQL . "
+    GROUP BY p.ProductCode, p.ProductName
+    ORDER BY netSales DESC;
+");
+
+$offlineTrendStartKey = (int) (clone $offlineMtdStart)->modify("-{$trendMonthsBack} months")->format('Ymd');
+$offlineTrendRows = fetch_all($conn, "
+    SELECT LEFT(CAST(f.DateKey AS varchar(8)), 6) AS ym, SUM(f.NetTotal) AS netSales
+    FROM FactSales f JOIN DimBranch b ON f.BranchKey = b.BranchKey JOIN DimProduct p ON f.ProductKey = p.ProductKey
+    WHERE f.DateKey >= {$offlineTrendStartKey} AND f.DateKey < {$offlineMtdEndKey} AND " . RETAIL_BRANCH_SQL . " AND " . SELLABLE_PRODUCT_SQL . "
+    GROUP BY LEFT(CAST(f.DateKey AS varchar(8)), 6);
+");
+$offlineTrendByMonth = [];
+foreach ($offlineTrendRows as $row) {
+    // DateKey-derived 'yyyyMM' -> 'yyyy-MM' to match the Online trend's key format
+    $ym = substr((string) $row['ym'], 0, 4) . '-' . substr((string) $row['ym'], 4, 2);
+    $offlineTrendByMonth[$ym] = n($row['netSales']);
+}
+
+// Shared 12-month axis: the later of the two channels' latest month, so a lagging
+// source shows trailing zeros/nulls rather than silently truncating the other's data.
+$trendAnchor = max($onlineMtdStart, $offlineMtdStart);
+$trendMonths = [];
+for ($i = $trendMonthsBack; $i >= 0; $i--) {
+    $trendMonths[] = (clone $trendAnchor)->modify("-{$i} months");
+}
+
+// Consignment has no real sales data yet (FactSales excludes consignment/warehouse
+// branches by design — see RETAIL_BRANCH_SQL comment). These figures stay mock
+// placeholders until that data exists.
+$consignmentTotalSalesMock = 18500000;
+$consignmentMonthlyTargetMock = 20000000;
+$consignmentBranchesMock = [
+    ['name' => 'King Power', 'sales' => 12000000, 'orders' => 950, 'aov' => 12631, 'type' => 'consignment'],
+    ['name' => 'Sephora', 'sales' => 8500000, 'orders' => 680, 'aov' => 12500, 'type' => 'consignment'],
+];
+
+// Annual Goal card is always true current-month/current-year, independent of the
+// page's date_range filter — it's a fixed business-tracking widget, not a "view".
+$goalMonthsElapsed = (int) $trendAnchor->format('n');
+$goalCurrentMonth = $onlineMonthActual + $offlineMonthActual + $consignmentTotalSalesMock;
+$goalCurrentYear = $onlineYtdNetSales + $offlineYtdNetSales + ($consignmentTotalSalesMock * $goalMonthsElapsed);
+
+/**
+ * Consignment has no real per-period figure, so its contribution to the filter-driven
+ * KPI cards/donut is scaled to roughly match whichever window is selected (using the
+ * same flat monthly mock as the base rate) — otherwise a flat monthly number would
+ * either overstate "today" or understate "this year" while Online/Offline correctly
+ * scale with the filter.
+ */
+$consignmentPeriodEstimate = match ($filterValues['date_range']) {
+    'today' => round($consignmentTotalSalesMock / 30),
+    'ytd' => $consignmentTotalSalesMock * $goalMonthsElapsed,
+    default => $consignmentTotalSalesMock, // mtd
+};
+
+$ordersTotal = $onlineOrders + $offlineOrders; // consignment order count unavailable, excluded (same as before)
+$unitsSoldTotal = $onlineUnits + $offlineUnits;
+
+$regionalSales = [];
+foreach ($offlineZoneRows as $row) {
+    $regionalSales[(string) $row['zone']] = n($row['netSales']);
+}
+
+$offlineBranches = [];
+foreach ($offlineBranchRows as $row) {
+    $sales = n($row['netSales']);
+    $orders = (int) n($row['orders']);
+    $offlineBranches[] = [
+        'name' => (string) $row['BranchName'],
+        'sales' => $sales,
+        'orders' => $orders,
+        'aov' => $orders > 0 ? round($sales / $orders) : 0,
+        'type' => 'offline',
+    ];
+}
+
+$topOnlineProductsReal = [];
+foreach ($onlineTopProductRows as $row) {
+    $channels = $onlineTopProductChannels[$row['product_key']] ?? [];
+    $sales = n($row['netSales']);
+    $topOnlineProductsReal[] = [
+        'name' => (string) $row['productName'],
+        'sku' => $row['sku'] ?? '',
+        'sales' => $sales,
+        'unit' => n($row['units']),
+        'contribution' => $onlineNetSales > 0 ? round($sales / $onlineNetSales * 100) : 0,
+        'channels' => array_map('n', $channels),
+    ];
+}
+
+$topOfflineProductsReal = [];
+foreach ($offlineTopProductRows as $row) {
+    $sales = n($row['netSales']);
+    $topOfflineProductsReal[] = [
+        'name' => (string) $row['ProductName'],
+        'sku' => (string) $row['ProductCode'],
+        'sales' => $sales,
+        'unit' => n($row['units']),
+        'contribution' => $offlineNetSales > 0 ? round($sales / $offlineNetSales * 100) : 0,
+    ];
+}
+
+// Consignment has no real monthly history — carry forward a flat run-rate (average
+// of the old mock's 12 monthly values) rather than fabricating month-specific numbers.
+$consignmentMonthlyFlat = round((15000000 + 16000000 + 17000000 + 18000000 + 18500000 + 19000000 + 19500000 + 18000000 + 17500000 + 17000000 + 18000000 + 20000000) / 12);
+
+$monthlyTrend = [];
+foreach ($trendMonths as $monthDate) {
+    $ym = $monthDate->format('Y-m');
+    $onlineChannelsForMonth = $onlineTrendByMonth[$ym] ?? [];
+    $monthlyTrend[] = [
+        'month' => $monthDate->format('M'),
+        'online' => array_sum($onlineChannelsForMonth),
+        'offline' => $offlineTrendByMonth[$ym] ?? 0.0,
+        'consignment' => $consignmentMonthlyFlat,
+        'channels' => array_map('n', $onlineChannelsForMonth),
+    ];
+}
+
+// Overview data: Online/Offline are real (all_report), Consignment stays mock —
+// there is no consignment sales data yet (see comment above).
 $mockData = [
     'goal' => [
-        'annual' => 1000000000, // 1,000 ล้านบาทต่อปี
-        'currentYear' => 520000000, // ยอดจริงปีนี้ (6 เดือนแรก) - 520 ล้าน
-        'monthlyTarget' => 83333333, // เป้าหมายรายเดือน
-        'currentMonth' => 95000000, // ยอดจริงเดือนนี้ - 95 ล้าน
-        'projected' => 1040000000, // คาดการณ์ปลายปี - 1,040 ล้าน
+        'annual' => 1000000000, // business target placeholder — no target table exists (same as Online/Offline dashboards)
+        'currentYear' => $goalCurrentYear,
+        'monthlyTarget' => 83333333, // business target placeholder
+        'currentMonth' => $goalCurrentMonth,
+        'projected' => 1040000000, // business target placeholder
         'onTrack' => true
     ],
     'totalSales' => [
-        'online' => 58000000,
-        'offline' => 37000000,
-        'consignment' => 18500000,
-        'total' => 113500000
+        'online' => $onlineNetSales,
+        'offline' => $offlineNetSales,
+        'consignment' => $consignmentPeriodEstimate,
+        'total' => $onlineNetSales + $offlineNetSales + $consignmentPeriodEstimate
     ],
+    // Always true previous-month actual, independent of the date_range filter — "Monthly
+    // Target Progress" below is a fixed month-over-month widget, not a filtered view.
     'monthlyTargets' => [
-        'online' => 55000000,
-        'offline' => 40000000,
-        'consignment' => 20000000,
-        'total' => 115000000
+        'online' => $onlineMonthPrevActual,
+        'offline' => $offlineMonthPrevActual,
+        'consignment' => $consignmentMonthlyTargetMock,
+        'total' => $onlineMonthPrevActual + $offlineMonthPrevActual + $consignmentMonthlyTargetMock
     ],
-    'regionalSales' => [
-        'Bangkok' => 52000000,
-        'Central' => 28000000,
-        'North' => 15000000,
-        'Northeast' => 8500000,
-        'South' => 10000000
+    // Always true current-month actual — feeds "Monthly Target Progress" bars (see monthlyTargets above).
+    'monthlyActual' => [
+        'online' => $onlineMonthActual,
+        'offline' => $offlineMonthActual,
+        'consignment' => $consignmentTotalSalesMock,
     ],
+    'regionalSales' => $regionalSales, // Offline (retail branches) only — Online/Consignment have no geographic attribution
     'growth' => [
-        'online' => 28.5,
-        'offline' => 12.3,
-        'total' => 22.1
+        'online' => round($onlineGrowth, 1),
+        'offline' => round($offlineGrowth, 1),
+        'total' => $onlineBaselineReliable ? round(pct_change($onlineNetSales + $offlineNetSales, $onlinePrevNetSales + $offlinePrevNetSales), 1) : 0.0
     ],
     'orders' => [
-    'online' => 12500,
-    'offline' => 3200,
-    'total' => 15700
+        'online' => $onlineOrders,
+        'offline' => $offlineOrders,
+        'total' => $ordersTotal
     ],
-    'unitsSold' => 24800,
-    'upt' => round(24800 / 15700, 2), // Units per Transaction = unitsSold / orders
+    'unitsSold' => $unitsSoldTotal,
+    'upt' => $ordersTotal > 0 ? round($unitsSoldTotal / $ordersTotal, 2) : 0,
 
-'aov' => round(95000000 / 15700),
+    // AOV matches the same filtered period as Revenue/Orders above (not the fixed monthly goal figure).
+    'aov' => $ordersTotal > 0 ? round(($onlineNetSales + $offlineNetSales + $consignmentPeriodEstimate) / $ordersTotal) : 0,
 
-'alerts' => [
-    ['type' => 'positive', 'message' => 'Shopee +45.2% vs last month'],
-    ['type' => 'positive', 'message' => 'TikTok +32.5% vs last month'],
-    ['type' => 'positive', 'message' => 'Central World +18.1% vs last month'],
-    ['type' => 'negative', 'message' => 'Lazada -12.4% vs last month'],
-    ['type' => 'negative', 'message' => 'Legacy Parfum -8.3% vs last month']
-],
-    'platforms' => [
-        ['name' => 'Shopee', 'sales' => 28000000, 'orders' => 5200, 'growth' => 32.5, 'channel' => 'Shopee'],
-        ['name' => 'TikTok', 'sales' => 18500000, 'orders' => 3800, 'growth' => 45.2, 'channel' => 'TikTok'],
-        ['name' => 'Website', 'sales' => 8500000, 'orders' => 2100, 'growth' => 18.5, 'channel' => 'Website'],
-        ['name' => 'Lazada', 'sales' => 3000000, 'orders' => 1400, 'growth' => 12.8, 'channel' => 'Facebook']
+    // Dead code below (wrapped in an HTML comment in the markup) — left as-is, out of scope.
+    'alerts' => [
+        ['type' => 'positive', 'message' => 'Shopee +45.2% vs last month'],
+        ['type' => 'positive', 'message' => 'TikTok +32.5% vs last month'],
+        ['type' => 'positive', 'message' => 'Central World +18.1% vs last month'],
+        ['type' => 'negative', 'message' => 'Lazada -12.4% vs last month'],
+        ['type' => 'negative', 'message' => 'Legacy Parfum -8.3% vs last month']
     ],
-'branches' => [
-[
-'name'=>'Journal Central World',
-'sales'=>14500000,
-'orders'=>1200,
-'aov'=>12083,
-'type'=>'offline',
-'region'=>'Bangkok',
-'lat'=>13.7246,
-'lng'=>100.5433,
-'channels'=>['Shopee'=>5000000,'TikTok'=>4000000,'Website'=>2000000,'Facebook'=>2500000,'Line OA'=>1000000]
-],
-[
-'name'=>'Journal Central Ladprao',
-'sales'=>9500000,
-'orders'=>850,
-'aov'=>11176,
-'type'=>'offline',
-'region'=>'Bangkok',
-'lat'=>13.8050,
-'lng'=>100.6329,
-'channels'=>['Shopee'=>3500000,'TikTok'=>2500000,'Website'=>1500000,'Facebook'=>1500000,'Line OA'=>500000]
-],
-[
-'name'=>'Journal MAYA',
-'sales'=>7200000,
-'orders'=>620,
-'aov'=>11612,
-'type'=>'offline',
-'region'=>'Chiang Mai',
-'lat'=>18.7883,
-'lng'=>98.9853,
-'channels'=>['Shopee'=>2500000,'TikTok'=>2000000,'Website'=>1200000,'Facebook'=>1000000,'Line OA'=>500000]
-],
-[
-'name'=>'Journal Central Chiangmai',
-'sales'=>3800000,
-'orders'=>320,
-'aov'=>11875,
-'type'=>'offline',
-'region'=>'Chiang Mai',
-'lat'=>18.7930,
-'lng'=>98.9870,
-'channels'=>['Shopee'=>1200000,'TikTok'=>1000000,'Website'=>800000,'Facebook'=>500000,'Line OA'=>300000]
-],
-[
-'name'=>'Journal Central Hatyai',
-'sales'=>2000000,
-'orders'=>210,
-'aov'=>9523,
-'type'=>'offline',
-'region'=>'Songkhla',
-'lat'=>7.0085,
-'lng'=>100.4747,
-'channels'=>['Shopee'=>600000,'TikTok'=>500000,'Website'=>400000,'Facebook'=>300000,'Line OA'=>200000]
-],
-[
-'name'=>'King Power',
-'sales'=>12000000,
-'orders'=>950,
-'aov'=>12631,
-'type'=>'consignment',
-'region'=>'Bangkok',
-'lat'=>13.6900,
-'lng'=>100.7501,
-'channels'=>['Shopee'=>4000000,'TikTok'=>3000000,'Website'=>2000000,'Facebook'=>2000000,'Line OA'=>1000000]
-],
-[
-'name'=>'Sephora',
-'sales'=>8500000,
-'orders'=>680,
-'aov'=>12500,
-'type'=>'consignment',
-'region'=>'Bangkok',
-'lat'=>13.7290,
-'lng'=>100.5640,
-'channels'=>['Shopee'=>3000000,'TikTok'=>2000000,'Website'=>1500000,'Facebook'=>1500000,'Line OA'=>500000]
-]
-],
-    'topProducts' => [
-        ['name' => 'Promise Parfum 100 ml', 'sales' => 18500000,'unit' => 2450, 'contribution'=>25, 'category' => 'PERFUME', 'channels' => ['Shopee' => 8500000, 'TikTok' => 6000000, 'Website' => 2500000, 'Facebook' => 1000000, 'Line OA' => 500000]],
-        ['name' => 'Laong Nan Parfum 50 ml', 'sales' => 12500000, 'unit' => 1992,'contribution'=>19, 'category' => 'PERFUME', 'channels' => ['Shopee' => 5000000, 'TikTok' => 4000000, 'Website' => 2000000, 'Facebook' => 1000000, 'Line OA' => 500000]],
-        ['name' => 'The Legacy Parfum 50 ml', 'sales' => 9800000, 'unit' => 1400,'contribution'=>15, 'category' => 'PERFUME', 'channels' => ['Shopee' => 4000000, 'TikTok' => 3000000, 'Website' => 1500000, 'Facebook' => 800000, 'Line OA' => 500000]],
-        ['name' => 'Forever Love Body Oil 180 ml', 'sales' => 7200000,'unit' => 1023, 'contribution'=>14, 'category' => 'SKINCARE', 'channels' => ['Shopee' => 3000000, 'TikTok' => 2000000, 'Website' => 1000000, 'Facebook' => 800000, 'Line OA' => 400000]],
-        ['name' => 'Mango Vanilla Perfume Sachet', 'sales' => 5500000, 'unit' => 888, 'contribution'=>12, 'category' => 'HOME & LIFESTYLE', 'channels' => ['Shopee' => 2500000, 'TikTok' => 1500000, 'Website' => 800000, 'Facebook' => 400000, 'Line OA' => 300000]]
-    ],
-    'monthlyTrend' => [
-        ['month' => 'Jan', 'online' => 42000000, 'offline' => 28000000, 'consignment' => 15000000, 'channels' => ['Shopee' => 18000000, 'TikTok' => 12000000, 'Website' => 6000000, 'Facebook' => 4000000, 'Line OA' => 2000000]],
-        ['month' => 'Feb', 'online' => 45000000, 'offline' => 30000000, 'consignment' => 16000000, 'channels' => ['Shopee' => 19000000, 'TikTok' => 13000000, 'Website' => 6500000, 'Facebook' => 4500000, 'Line OA' => 2000000]],
-        ['month' => 'Mar', 'online' => 48000000, 'offline' => 32000000, 'consignment' => 17000000, 'channels' => ['Shopee' => 20000000, 'TikTok' => 14000000, 'Website' => 7000000, 'Facebook' => 5000000, 'Line OA' => 2000000]],
-        ['month' => 'Apr', 'online' => 52000000, 'offline' => 34000000, 'consignment' => 18000000, 'channels' => ['Shopee' => 22000000, 'TikTok' => 15000000, 'Website' => 7500000, 'Facebook' => 5500000, 'Line OA' => 2000000]],
-        ['month' => 'May', 'online' => 55000000, 'offline' => 35000000, 'consignment' => 18500000, 'channels' => ['Shopee' => 23000000, 'TikTok' => 16000000, 'Website' => 8000000, 'Facebook' => 6000000, 'Line OA' => 2000000]],
-        ['month' => 'Jun', 'online' => 58000000, 'offline' => 37000000, 'consignment' => 19000000, 'channels' => ['Shopee' => 24000000, 'TikTok' => 17000000, 'Website' => 8500000, 'Facebook' => 6500000, 'Line OA' => 2000000]],
-        ['month' => 'Jul', 'online' => 60000000, 'offline' => 38000000, 'consignment' => 19500000, 'channels' => ['Shopee' => 25000000, 'TikTok' => 18000000, 'Website' => 9000000, 'Facebook' => 6000000, 'Line OA' => 2000000]],
-        ['month' => 'Aug', 'online' => 57000000, 'offline' => 36000000, 'consignment' => 18000000, 'channels' => ['Shopee' => 24000000, 'TikTok' => 17000000, 'Website' => 8500000, 'Facebook' => 5500000, 'Line OA' => 2000000]],
-        ['month' => 'Sep', 'online' => 55000000, 'offline' => 34000000, 'consignment' => 17500000, 'channels' => ['Shopee' => 23000000, 'TikTok' => 16000000, 'Website' => 8000000, 'Facebook' => 5000000, 'Line OA' => 2000000]],
-        ['month' => 'Oct', 'online' => 53000000, 'offline' => 32000000, 'consignment' => 17000000, 'channels' => ['Shopee' => 22000000, 'TikTok' => 15000000, 'Website' => 7500000, 'Facebook' => 4500000, 'Line OA' => 2000000]],
-        ['month' => 'Nov', 'online' => 56000000, 'offline' => 35000000, 'consignment' => 18000000, 'channels' => ['Shopee' => 23000000, 'TikTok' => 16000000, 'Website' => 8000000, 'Facebook' => 5000000, 'Line OA' => 2000000]],
-        ['month' => 'Dec', 'online' => 62000000, 'offline' => 40000000, 'consignment' => 20000000, 'channels' => ['Shopee' => 26000000, 'TikTok' => 18000000, 'Website' => 9000000, 'Facebook' => 6000000, 'Line OA' => 3000000]]
-    ]
-    
+
+    'platforms' => $onlinePlatforms, // real platforms: shopee, line_shopping, own_website
+
+    'branches' => array_merge($offlineBranches, $consignmentBranchesMock),
+
+    'topOnlineProducts' => $topOnlineProductsReal,
+    'topOfflineProducts' => $topOfflineProductsReal,
+
+    'monthlyTrend' => $monthlyTrend
 ];
 // Sales channel breakdown for donut chart
 $salesChannelBreakdown = [
@@ -199,6 +597,34 @@ $maxTrendValue = max(array_merge(
     array_column($mockData['monthlyTrend'], 'offline')
 ));
 ?>
+<style>
+    .goal-progress-row { display: flex; align-items: center; gap: 25px; }
+    .goal-progress-donut { position: relative; width: 130px; height: 130px; flex-shrink: 0; }
+    .row1-grid { display: grid; grid-template-columns: 3fr 2fr; gap: 20px; margin-bottom: 20px; }
+    .row1-grid canvas { height: 320px; }
+    .channel-legend-row { display: flex; align-items: center; justify-content: center; gap: 40px; padding: 20px 0; }
+    .channel-donut-wrap { position: relative; width: 180px; height: 180px; flex-shrink: 0; }
+    .channel-legend-col { flex: 1; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+    .layer2-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 25px; }
+    .row2-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
+    .row2-grid canvas { height: 280px; }
+    .row3-grid { display: grid; grid-template-columns: 1fr; gap: 20px; margin-bottom: 20px; }
+    .row3-grid canvas { height: 220px; }
+
+    @media (max-width: 1100px) {
+        .kpi-grid { grid-template-columns: repeat(2, 1fr); }
+        .row1-grid, .row2-grid { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 640px) {
+        .kpi-grid { grid-template-columns: 1fr; }
+        .goal-progress-row { flex-direction: column; align-items: stretch; }
+        .channel-legend-row { flex-direction: column; gap: 16px; }
+        .layer2-grid { grid-template-columns: 1fr; }
+        .row1-grid canvas { height: 240px; }
+        .row2-grid canvas { height: 220px; }
+        .row3-grid canvas { height: 180px; }
+    }
+</style>
         <!-- Annual Goal Tracking -->
         <div class="goal-card">
             <div class="goal-header">
@@ -215,8 +641,8 @@ $maxTrendValue = max(array_merge(
                 <div class="progress-label">
                     <span>Year-to-Date Progress</span>
                 </div>
-                <div style="display: flex; align-items: center; gap: 25px;">
-                    <div style="position: relative; width: 130px; height: 130px; flex-shrink: 0;">
+                <div class="goal-progress-row">
+                    <div class="goal-progress-donut">
                         <canvas id="goalProgressChart"></canvas>
                         <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; pointer-events: none;">
                             <div style="font-size: 28px; font-weight: 300; color: white; line-height: 1;"><?php echo number_format(($mockData['goal']['currentYear'] / $mockData['goal']['annual']) * 100, 1); ?>%</div>
@@ -239,44 +665,32 @@ $achievement = ($mockData['goal']['currentMonth'] / $mockData['goal']['monthlyTa
 
     <div class="stat-item">
         <div class="stat-label">Current Year</div>
-        <div class="stat-value">
-            <?php echo number_format($mockData['goal']['currentYear']); ?>
-        </div>
+        <div class="stat-value count-up" data-count-to="<?php echo (int) $mockData['goal']['currentYear']; ?>">0</div>
     </div>
 
     <div class="stat-item">
         <div class="stat-label">Achievement</div>
-        <div class="stat-value" style="color: <?php echo $achievement >= 100 ? '#6ee7b7' : '#fca5a5'; ?>;">
-            <?php echo number_format($achievement, 1); ?>%
-        </div>
+        <div class="stat-value count-up" data-count-to="<?php echo $achievement; ?>" data-decimals="1" data-suffix="%" style="color: <?php echo $achievement >= 100 ? '#6ee7b7' : '#fca5a5'; ?>;">0%</div>
     </div>
 
     <div class="stat-item">
         <div class="stat-label">Monthly Target</div>
-        <div class="stat-value">
-            <?php echo number_format($mockData['goal']['monthlyTarget']); ?>
-        </div>
+        <div class="stat-value count-up" data-count-to="<?php echo (int) $mockData['goal']['monthlyTarget']; ?>">0</div>
     </div>
 
     <div class="stat-item">
         <div class="stat-label">Gap</div>
-        <div class="stat-value">
-            <?php echo number_format($gap); ?>
-        </div>
+        <div class="stat-value count-up" data-count-to="<?php echo (int) $gap; ?>">0</div>
     </div>
 
     <div class="stat-item">
         <div class="stat-label">Current MTD</div>
-        <div class="stat-value">
-            <?php echo number_format($mockData['goal']['currentMonth']); ?>
-        </div>
+        <div class="stat-value count-up" data-count-to="<?php echo (int) $mockData['goal']['currentMonth']; ?>">0</div>
     </div>
 
     <div class="stat-item">
         <div class="stat-label">Projected</div>
-        <div class="stat-value">
-            <?php echo number_format($mockData['goal']['projected']); ?>
-        </div>
+        <div class="stat-value count-up" data-count-to="<?php echo (int) $mockData['goal']['projected']; ?>">0</div>
     </div>
 </div>
     </div>
@@ -287,9 +701,9 @@ $achievement = ($mockData['goal']['currentMonth'] / $mockData['goal']['monthlyTa
             <div style="display: flex; flex-direction: column; gap: 20px;">
                 <?php
                 $channels = [
-                    ['name' => 'Online', 'current' => $mockData['totalSales']['online'], 'target' => $mockData['monthlyTargets']['online'], 'color' => '#c9a227'],
-                    ['name' => 'Offline', 'current' => $mockData['totalSales']['offline'], 'target' => $mockData['monthlyTargets']['offline'], 'color' => '#1a1a2e'],
-                    ['name' => 'Consignment', 'current' => $mockData['totalSales']['consignment'], 'target' => $mockData['monthlyTargets']['consignment'], 'color' => '#e67e22']
+                    ['name' => 'Online', 'current' => $mockData['monthlyActual']['online'], 'target' => $mockData['monthlyTargets']['online'], 'color' => '#c9a227'],
+                    ['name' => 'Offline', 'current' => $mockData['monthlyActual']['offline'], 'target' => $mockData['monthlyTargets']['offline'], 'color' => '#1a1a2e'],
+                    ['name' => 'Consignment', 'current' => $mockData['monthlyActual']['consignment'], 'target' => $mockData['monthlyTargets']['consignment'], 'color' => '#e67e22']
                 ];
                 foreach ($channels as $channel):
                     $progress = min(100, ($channel['current'] / $channel['target']) * 100);
@@ -327,7 +741,7 @@ $achievement = ($mockData['goal']['currentMonth'] / $mockData['goal']['monthlyTa
             margin-bottom:10px;
             border-radius:8px;
             background:#f9fafb;
-            border-left:4px solid <?php echo $alert['type']=='positive' ? '#10b981' : '#ef4444'; ?>;
+            border-left:4px solid <?php //echo $alert['type']=='positive' ? '#10b981' : '#ef4444'; ?>;
         ">
 
             <?php //if($alert['type']=='positive'): ?>
@@ -398,7 +812,7 @@ $achievement = ($mockData['goal']['currentMonth'] / $mockData['goal']['monthlyTa
 </div>
 
         <!-- Row 1: Overview Trends and Channels -->
-        <div style="display: grid; grid-template-columns: 3fr 2fr; gap: 20px; margin-bottom: 20px;">
+        <div class="row1-grid">
             <!-- Monthly Revenue Trend (60%) -->
             <div class="chart-card">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
@@ -406,7 +820,7 @@ $achievement = ($mockData['goal']['currentMonth'] / $mockData['goal']['monthlyTa
                     <a href="#" style="font-size: 11px; color: #c9a227; text-decoration: none; font-weight: 500;">View Details →</a>
                 </div>
                 <div style="padding: 20px 0;">
-                    <canvas id="monthlyRevenueChart" style="height: 320px;"></canvas>
+                    <canvas id="monthlyRevenueChart"></canvas>
                 </div>
             </div>
 
@@ -415,8 +829,8 @@ $achievement = ($mockData['goal']['currentMonth'] / $mockData['goal']['monthlyTa
                 <h3 id="channel-contribution">Sales Channel Distribution</h3>
 
                 <!-- Layer 1: Donut Chart -->
-                <div style="padding: 20px 0; display: flex; align-items: center; justify-content: center; gap: 40px;">
-                    <div style="position: relative; width: 180px; height: 180px; flex-shrink: 0;">
+                <div class="channel-legend-row">
+                    <div class="channel-donut-wrap">
                         <canvas id="channelContributionChart"></canvas>
                         <!-- Center Text -->
                         <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; pointer-events: none;">
@@ -426,7 +840,7 @@ $achievement = ($mockData['goal']['currentMonth'] / $mockData['goal']['monthlyTa
                     </div>
 
                     <!-- Legend -->
-                    <div style="flex: 1; display: flex; flex-direction: column; gap: 10px;">
+                    <div class="channel-legend-col">
                         <?php foreach ($salesChannelBreakdown as $row): ?>
                         <div style="display: flex; align-items: center; gap: 10px;">
                             <div style="width: 12px; height: 12px; border-radius: 3px; background: <?php echo $row['color']; ?>;"></div>
@@ -440,7 +854,7 @@ $achievement = ($mockData['goal']['currentMonth'] / $mockData['goal']['monthlyTa
                 </div>
 
                 <!-- Layer 2: Top Platform/Location Tables -->
-                <div style="margin-top: 25px; padding-top: 20px; border-top: 1px solid #f0f0f0; display: grid; grid-template-columns: 1fr 1fr; gap: 25px;">
+                <div class="layer2-grid" style="margin-top: 25px; padding-top: 20px; border-top: 1px solid #f0f0f0;">
                     <!-- Top Online Platforms -->
                     <div>
                         <div style="font-size: 11px; color: #9CA3AF; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px; font-weight: 600;">Top Online Platforms</div>
@@ -486,15 +900,15 @@ $achievement = ($mockData['goal']['currentMonth'] / $mockData['goal']['monthlyTa
         </div>
 
         <!-- Row 2: Product and Geographic Dimensions -->
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
-            <!-- Top 5 Selling Products (50%) -->
+        <div class="row2-grid">
+            <!-- Top 5 Online Products (50%) -->
             <div class="chart-card">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-                    <h3 style="margin: 0;">Top 5 Selling Products</h3>
-                    <a href="#" style="font-size: 11px; color: #c9a227; text-decoration: none; font-weight: 500;">View In-Depth →</a>
+                    <h3 style="margin: 0;">Top 5 Online Products</h3>
+                    <a href="dashboard_online.php" style="font-size: 11px; color: #c9a227; text-decoration: none; font-weight: 500;">View Details →</a>
                 </div>
                 <div style="padding: 10px 0;">
-                    <canvas id="topProductsChart" style="height: 280px;"></canvas>
+                    <canvas id="topProductsChart"></canvas>
                 </div>
             </div>
 
@@ -505,12 +919,45 @@ $achievement = ($mockData['goal']['currentMonth'] / $mockData['goal']['monthlyTa
                     <a href="dashboard_offline.php" style="font-size: 11px; color: #c9a227; text-decoration: none; font-weight: 500;">View Details →</a>
                 </div>
                 <div style="padding: 10px 0;">
-                    <canvas id="geoChoroplethChart" style="height: 280px;"></canvas>
+                    <canvas id="geoChoroplethChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- Row 3: Top Offline Products (not affected by the Online platform cross-filter — no platform concept applies to retail branches) -->
+        <div class="row3-grid">
+            <div class="chart-card">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                    <h3 style="margin: 0;">Top 5 Offline Products</h3>
+                    <a href="dashboard_offline.php" style="font-size: 11px; color: #c9a227; text-decoration: none; font-weight: 500;">View Details →</a>
+                </div>
+                <div style="padding: 10px 0;">
+                    <canvas id="topOfflineProductsChart"></canvas>
                 </div>
             </div>
         </div>
 
 <script>
+    // Count-up animation for every stat in the Annual Goal card on page load
+    document.querySelectorAll('.count-up').forEach(function (el) {
+        const target = parseFloat(el.dataset.countTo) || 0;
+        const decimals = parseInt(el.dataset.decimals, 10) || 0;
+        const suffix = el.dataset.suffix || '';
+        const duration = 1200;
+        const startTime = performance.now();
+        const fmt = new Intl.NumberFormat('th-TH', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+
+        function tick(now) {
+            const progress = Math.min((now - startTime) / duration, 1);
+            const eased = 1 - Math.pow(1 - progress, 3); // ease-out cubic
+            el.textContent = fmt.format(target * eased) + suffix;
+            if (progress < 1) {
+                requestAnimationFrame(tick);
+            }
+        }
+        requestAnimationFrame(tick);
+    });
+
     // Monthly Revenue Trend Chart - Combo Chart (Bar + Line)
     const monthlyRevenueCtx = document.getElementById('monthlyRevenueChart').getContext('2d');
 
@@ -712,9 +1159,9 @@ $achievement = ($mockData['goal']['currentMonth'] / $mockData['goal']['monthlyTa
         }
     });
 
-    // Top Products Horizontal Bar Chart
+    // Top Online Products Horizontal Bar Chart
     const topProductsCtx = document.getElementById('topProductsChart').getContext('2d');
-    const top5Products = <?php echo json_encode(array_slice($mockData['topProducts'], 0, 5)); ?>;
+    const top5Products = <?php echo json_encode(array_slice($mockData['topOnlineProducts'], 0, 5)); ?>;
 
     const topProductsChart = new Chart(topProductsCtx, {
         type: 'bar',
@@ -783,6 +1230,67 @@ $achievement = ($mockData['goal']['currentMonth'] / $mockData['goal']['monthlyTa
                     grid: {
                         display: false
                     }
+                }
+            }
+        }
+    });
+
+    // Top Offline Products Horizontal Bar Chart (not affected by the platform cross-filter)
+    const topOfflineProductsCtx = document.getElementById('topOfflineProductsChart').getContext('2d');
+    const top5OfflineProducts = <?php echo json_encode(array_slice($mockData['topOfflineProducts'], 0, 5)); ?>;
+
+    const topOfflineProductsChart = new Chart(topOfflineProductsCtx, {
+        type: 'bar',
+        data: {
+            labels: top5OfflineProducts.map(p => p.name),
+            datasets: [{
+                label: 'Sales (฿)',
+                data: top5OfflineProducts.map(p => p.sales),
+                backgroundColor: '#1a1a2e',
+                borderColor: '#1a1a2e',
+                borderWidth: 1,
+                borderRadius: 4
+            }]
+        },
+        options: {
+            indexAxis: 'y',
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    enabled: true,
+                    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                    padding: 12,
+                    callbacks: {
+                        label: function(context) {
+                            const product = top5OfflineProducts[context.dataIndex];
+                            return [
+                                'Sales: ' + new Intl.NumberFormat('th-TH').format(product.sales),
+                                'Units: ' + new Intl.NumberFormat('th-TH').format(product.unit),
+                                'Contribution: ' + product.contribution + '%'
+                            ];
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    ticks: {
+                        callback: function(value) {
+                            if (value >= 1000000) {
+                                return (value / 1000000).toFixed(1) + 'M';
+                            }
+                            return value;
+                        },
+                        font: { size: 11, weight: 500 },
+                        color: '#6B7280'
+                    },
+                    grid: { color: 'rgba(0, 0, 0, 0.05)' }
+                },
+                y: {
+                    ticks: { font: { size: 12, weight: 500 }, color: '#374151' },
+                    grid: { display: false }
                 }
             }
         }
@@ -885,7 +1393,7 @@ $achievement = ($mockData['goal']['currentMonth'] / $mockData['goal']['monthlyTa
     // Store original data for filtering
     const originalData = {
         monthlyTrend: <?php echo json_encode($mockData['monthlyTrend']); ?>,
-        topProducts: <?php echo json_encode($mockData['topProducts']); ?>,
+        topOnlineProducts: <?php echo json_encode($mockData['topOnlineProducts']); ?>,
         branches: <?php echo json_encode($mockData['branches']); ?>,
         platforms: <?php echo json_encode($mockData['platforms']); ?>,
         kpi: {
@@ -1002,7 +1510,7 @@ $achievement = ($mockData['goal']['currentMonth'] / $mockData['goal']['monthlyTa
     }
 
     function updateTopProductsTable(channelName) {
-        const filteredProducts = originalData.topProducts
+        const filteredProducts = originalData.topOnlineProducts
             .map(product => ({
                 ...product,
                 filteredSales: product.channels[channelName] || 0
@@ -1102,7 +1610,7 @@ $achievement = ($mockData['goal']['currentMonth'] / $mockData['goal']['monthlyTa
         const productsTableBody = document.querySelector('#top-products').closest('.table-card').querySelector('tbody');
         if (productsTableBody) {
             productsTableBody.innerHTML = '';
-            originalData.topProducts.forEach(product => {
+            originalData.topOnlineProducts.forEach(product => {
                 const row = document.createElement('tr');
                 row.innerHTML = `
                     <td>${product.name}</td>
