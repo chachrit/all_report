@@ -106,6 +106,8 @@ $headerText = [
         'language' => 'ภาษา',
         'thai' => 'ไทย',
         'english' => 'อังกฤษ',
+        'reset' => 'ล้างตัวกรอง',
+        'search' => 'ค้นหา',
     ],
     'en' => [
         'dashboard' => 'Dashboard',
@@ -141,6 +143,8 @@ $headerText = [
         'language' => 'Language',
         'thai' => 'Thai',
         'english' => 'English',
+        'reset' => 'Reset',
+        'search' => 'Search',
     ],
 ];
 $headerUi = $headerText[$uiLanguage];
@@ -250,6 +254,7 @@ if (!function_exists('render_change')) {
             --color-green: #10b981;
             --color-purple: #667eea;
             --color-gray: #a0aec0;
+            --accent: <?php echo htmlspecialchars($accentColor); ?>;
         }
 
         * { box-sizing: border-box; }
@@ -260,38 +265,163 @@ if (!function_exists('render_change')) {
         .header .subtitle { margin: 5px 0 0; color: var(--text-secondary); font-size: 14px; }
         .header .date { font-size: 12px; color: var(--text-muted); }
         .header .updated { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+        .header-logo-link { display: inline-flex; align-items: center; opacity: 0.92; transition: opacity 0.15s ease, transform 0.15s ease; }
+        .header-logo-link:hover { opacity: 1; transform: scale(1.04); }
+        .header-logo { height: 46px; width: auto; display: block; }
 
         .nav { background: #f9f9f9; padding: 0 30px; border-bottom: 1px solid #e5e5e5; }
         .nav a { display: inline-block; padding: 15px 25px; color: var(--text-secondary); text-decoration: none; font-size: 13px; border-bottom: 2px solid transparent; }
         .nav a:hover, .nav a.active { color: var(--text-primary); border-bottom-color: var(--text-primary); }
 
-        .filter-bar { background: #fff; padding: 15px 30px; border-bottom: 1px solid #e5e5e5; display: flex; align-items: center; gap: 20px; position: sticky; top: 0; z-index: 100; box-shadow: 0 2px 8px rgba(0,0,0,0.05); flex-wrap: wrap; }
-        .filter-bar .filter-item { display: flex; align-items: center; gap: 8px; }
-        .filter-bar .filter-label { font-size: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; font-weight: 500; }
+        .filter-bar {
+            background: rgba(255,255,255,0.9);
+            backdrop-filter: saturate(180%) blur(14px);
+            -webkit-backdrop-filter: saturate(180%) blur(14px);
+            padding: 12px 30px;
+            border-bottom: 1px solid rgba(17,24,39,0.06);
+            display: flex;
+            align-items: stretch;
+            gap: 14px;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            box-shadow: 0 4px 18px rgba(17,24,39,0.05);
+            flex-wrap: wrap;
+        }
+        .filter-segments {
+            display: flex;
+            align-items: stretch;
+            flex-wrap: wrap;
+            flex: 1 1 auto;
+            background: #F8F9FB;
+            border: 1px solid #ECEEF1;
+            border-radius: 10px;
+        }
+        .filter-bar .filter-item:first-child { border-top-left-radius: 10px; border-bottom-left-radius: 10px; }
+        .filter-bar .filter-item:last-child { border-top-right-radius: 10px; border-bottom-right-radius: 10px; }
+        .filter-bar .filter-item {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 3px;
+            padding: 9px 20px;
+            border-left: 1px solid #ECEEF1;
+            transition: background 0.15s ease;
+        }
+        .filter-bar .filter-item:first-child { border-left: none; }
+        .filter-bar .filter-item:hover { background: rgba(0,0,0,0.02); }
+        .filter-bar .filter-item:focus-within {
+            background: #fff;
+            box-shadow: inset 0 0 0 1px var(--accent);
+        }
+        .filter-bar .filter-label { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; white-space: nowrap; }
         .filter-bar .filter-value { font-size: 13px; color: var(--text-primary); font-weight: 500; padding: 6px 12px; background: #f9f9f9; border-radius: 4px; }
-        .filter-bar .separator { color: #d1d5db; font-size: 14px; }
-        .filter-bar .dropdown { position: relative; }
+        .filter-bar .separator { display: none; }
+        .filter-bar .dropdown { position: relative; display: flex; align-items: center; }
         .filter-bar .dropdown select {
             appearance: none;
-            background: #f9f9f9;
-            border: 1px solid #e5e5e5;
-            border-radius: 4px;
-            padding: 6px 30px 6px 12px;
+            background: transparent;
+            border: none;
+            padding: 0 18px 0 0;
             font-size: 13px;
             color: var(--text-primary);
-            font-weight: 500;
+            font-weight: 600;
             cursor: pointer;
-            min-width: 120px;
+            min-width: 0;
         }
+        .filter-bar .dropdown select:focus { outline: none; }
         .filter-bar .dropdown::after {
-            content: '▼';
+            content: '⌄';
             position: absolute;
-            right: 10px;
+            right: 1px;
             top: 50%;
             transform: translateY(-50%);
-            font-size: 10px;
+            font-size: 12px;
             color: var(--text-muted);
             pointer-events: none;
+            transition: color 0.15s ease;
+        }
+        .filter-bar .filter-item:hover .dropdown::after,
+        .filter-bar .filter-item:focus-within .dropdown::after {
+            color: var(--accent);
+        }
+        .cs-trigger {
+            appearance: none;
+            background: transparent;
+            border: none;
+            padding: 0 18px 0 0;
+            margin: 0;
+            font-family: inherit;
+            font-size: 13px;
+            color: var(--text-primary);
+            font-weight: 600;
+            cursor: pointer;
+            text-align: left;
+            white-space: nowrap;
+        }
+        .cs-trigger:focus { outline: none; }
+        .cs-panel {
+            position: absolute;
+            top: calc(100% + 10px);
+            left: -1px;
+            min-width: 170px;
+            background: #fff;
+            border-radius: 12px;
+            box-shadow: 0 16px 36px rgba(17,24,39,0.16);
+            border: 1px solid rgba(17,24,39,0.06);
+            padding: 8px 0;
+            z-index: 200;
+            display: none;
+        }
+        .cs-panel.open { display: block; }
+        .cs-option {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 20px;
+            padding: 9px 20px;
+            font-size: 14px;
+            color: var(--text-primary);
+            cursor: pointer;
+            white-space: nowrap;
+        }
+        .cs-option:hover { background: #F8F9FB; }
+        .cs-option.selected { color: var(--color-positive); font-weight: 600; }
+        .cs-option .cs-check { color: var(--color-positive); font-size: 13px; visibility: hidden; }
+        .cs-option.selected .cs-check { visibility: visible; }
+        .filter-actions { display: flex; align-items: stretch; gap: 8px; flex: 0 0 auto; }
+        .filter-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            padding: 0 20px;
+            border-radius: 10px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            border: 1px solid transparent;
+            text-decoration: none;
+            white-space: nowrap;
+            transition: opacity 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+        }
+        .filter-btn-ghost {
+            background: #fff;
+            border-color: #ECEEF1;
+            color: var(--text-secondary);
+        }
+        .filter-btn-ghost:hover { border-color: #D1D5DB; color: var(--text-primary); }
+        .filter-btn-primary {
+            background: var(--color-positive);
+            color: #fff;
+        }
+        .filter-btn-primary:hover { opacity: 0.88; }
+        @media (max-width: 900px) {
+            .filter-bar { gap: 8px; padding: 10px 16px; }
+            .filter-bar .filter-item { padding: 12px 18px; }
+            .filter-segments { flex: 1 1 100%; }
+            .filter-actions { flex: 1 1 100%; }
+            .filter-btn { flex: 1 1 auto; padding: 10px 14px; }
         }
 
         .container { max-width: 1400px; margin: 30px auto; padding: 0 20px; }
@@ -413,11 +543,16 @@ if (!function_exists('render_change')) {
             <div class="subtitle"><?php echo htmlspecialchars($pageSubtitle); ?></div>
             <?php endif; ?>
         </div>
-        <div style="text-align: right;">
-            <div class="date"><?php echo htmlspecialchars($headerLabels['date'] ?? date('F j, Y')); ?></div>
-            <?php if (!empty($headerLabels['updated_at'])): ?>
-            <div class="updated"><?php echo htmlspecialchars($headerLabels['updated'] ?? 'Updated'); ?>: <?php echo htmlspecialchars($headerLabels['updated_at']); ?></div>
-            <?php endif; ?>
+        <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 10px;">
+            <a href="index.php" class="header-logo-link">
+                <img src="img/Journal_Logo No Icon_program title for watermark copy 2.png" alt="Journal" class="header-logo">
+            </a>
+            <div style="text-align: right;">
+                <div class="date"><?php echo htmlspecialchars($headerLabels['date'] ?? date('F j, Y')); ?></div>
+                <?php if (!empty($headerLabels['updated_at'])): ?>
+                <div class="updated"><?php echo htmlspecialchars($headerLabels['updated'] ?? 'Updated'); ?>: <?php echo htmlspecialchars($headerLabels['updated_at']); ?></div>
+                <?php endif; ?>
+            </div>
         </div>
     </div>
 
@@ -428,6 +563,7 @@ if (!function_exists('render_change')) {
     </div>
 
     <form class="filter-bar" method="get" action="<?php echo htmlspecialchars($currentPage); ?>">
+    <div class="filter-segments">
         <div class="filter-item">
             <span class="filter-label"><?php echo htmlspecialchars($filterOptions['date_label'] ?? 'Date Range'); ?></span>
             <div class="dropdown">
@@ -438,7 +574,6 @@ if (!function_exists('render_change')) {
                 </select>
             </div>
         </div>
-        <span class="separator">|</span>
         <div class="filter-item">
             <span class="filter-label"><?php echo htmlspecialchars($filterOptions['channel_label'] ?? 'Channel'); ?></span>
             <div class="dropdown">
@@ -449,7 +584,6 @@ if (!function_exists('render_change')) {
                 </select>
             </div>
         </div>
-        <span class="separator">|</span>
         <div class="filter-item">
             <span class="filter-label"><?php echo htmlspecialchars($filterOptions['branch_label'] ?? 'Branch'); ?></span>
             <div class="dropdown">
@@ -460,7 +594,6 @@ if (!function_exists('render_change')) {
                 </select>
             </div>
         </div>
-        <span class="separator">|</span>
         <div class="filter-item">
             <span class="filter-label"><?php echo htmlspecialchars($filterOptions['category_label'] ?? 'Category'); ?></span>
             <div class="dropdown">
@@ -471,7 +604,6 @@ if (!function_exists('render_change')) {
                 </select>
             </div>
         </div>
-        <span class="separator">|</span>
         <div class="filter-item">
             <span class="filter-label"><?php echo htmlspecialchars($filterOptions['campaign_label'] ?? 'Campaign'); ?></span>
             <div class="dropdown">
@@ -482,7 +614,6 @@ if (!function_exists('render_change')) {
                 </select>
             </div>
         </div>
-        <span class="separator">|</span>
         <div class="filter-item">
             <span class="filter-label"><?php echo htmlspecialchars($filterOptions['sales_type_label'] ?? 'Sales Type'); ?></span>
             <div class="dropdown">
@@ -494,7 +625,6 @@ if (!function_exists('render_change')) {
             </div>
         </div>
         <?php if (!empty($filterOptions['language_enabled'])): ?>
-        <span class="separator">|</span>
         <div class="filter-item">
             <span class="filter-label"><?php echo htmlspecialchars($filterOptions['language_label'] ?? 'Language'); ?></span>
             <div class="dropdown">
@@ -506,6 +636,11 @@ if (!function_exists('render_change')) {
             </div>
         </div>
         <?php endif; ?>
+    </div>
+    <div class="filter-actions">
+        <a class="filter-btn filter-btn-ghost" href="<?php echo htmlspecialchars(header_url_with_lang($currentPage, $uiLanguage)); ?>"><?php echo htmlspecialchars(header_ui_text($headerUi, 'reset')); ?></a>
+        <button type="submit" class="filter-btn filter-btn-primary"><?php echo htmlspecialchars(header_ui_text($headerUi, 'search')); ?></button>
+    </div>
     </form>
 
     <script>
@@ -519,6 +654,65 @@ if (!function_exists('render_change')) {
         function updateDashboardData() {
             document.querySelector('.filter-bar').submit();
         }
+
+        // Replaces each native <select> in the filter bar with a custom trigger +
+        // floating panel (browsers render native <select> popups themselves, which
+        // can't be restyled) — the original <select> stays in the DOM hidden, so
+        // form submission and each select's existing onchange handler are untouched.
+        (function enhanceFilterDropdowns() {
+            function closeAllPanels() {
+                document.querySelectorAll('.cs-panel.open').forEach(function (p) { p.classList.remove('open'); });
+            }
+
+            document.querySelectorAll('.filter-bar .dropdown select').forEach(function (select) {
+                var wrap = select.closest('.dropdown');
+                select.style.display = 'none';
+
+                var trigger = document.createElement('button');
+                trigger.type = 'button';
+                trigger.className = 'cs-trigger';
+                trigger.textContent = select.options[select.selectedIndex] ? select.options[select.selectedIndex].text : '';
+                wrap.insertBefore(trigger, select);
+
+                var panel = document.createElement('div');
+                panel.className = 'cs-panel';
+
+                Array.prototype.forEach.call(select.options, function (opt) {
+                    var item = document.createElement('div');
+                    item.className = 'cs-option' + (opt.selected ? ' selected' : '');
+
+                    var label = document.createElement('span');
+                    label.textContent = opt.text;
+                    var check = document.createElement('span');
+                    check.className = 'cs-check';
+                    check.textContent = '✓';
+                    item.appendChild(label);
+                    item.appendChild(check);
+
+                    item.addEventListener('click', function () {
+                        select.value = opt.value;
+                        trigger.textContent = opt.text;
+                        panel.querySelectorAll('.cs-option').forEach(function (o) { o.classList.remove('selected'); });
+                        item.classList.add('selected');
+                        closeAllPanels();
+                        select.dispatchEvent(new Event('change'));
+                    });
+
+                    panel.appendChild(item);
+                });
+
+                wrap.appendChild(panel);
+
+                trigger.addEventListener('click', function (e) {
+                    e.stopPropagation();
+                    var isOpen = panel.classList.contains('open');
+                    closeAllPanels();
+                    if (!isOpen) panel.classList.add('open');
+                });
+            });
+
+            document.addEventListener('click', closeAllPanels);
+        })();
     </script>
 
     <div class="container">

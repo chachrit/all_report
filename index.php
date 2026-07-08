@@ -630,38 +630,28 @@ $maxTrendValue = max(array_merge(
 ));
 ?>
 <style>
-    .goal-card {
-        position: relative;
+    .annual-goal-card {
+        display: flex;
+        align-items: stretch;
+        border-radius: 12px;
         overflow: hidden;
-        isolation: isolate;
-        background:
-            radial-gradient(circle at 105% -10%, rgba(201,162,39,0.28) 0%, rgba(201,162,39,0) 42%),
-            radial-gradient(circle at -5% 115%, rgba(58,79,140,0.30) 0%, rgba(58,79,140,0) 48%),
-            linear-gradient(160deg, #0c1220 0%, #1a1a2e 100%) !important;
-        border-left: none !important;
-        box-shadow: 0 10px 28px rgba(12,18,32,0.28) !important;
+        margin-bottom: 30px;
+        box-shadow: 0 10px 28px rgba(12,18,32,0.16);
     }
-    .goal-card::before {
-        content: '';
-        position: absolute; inset: 0;
-        background-image: radial-gradient(rgba(255,255,255,0.06) 1px, transparent 1px);
-        background-size: 16px 16px;
-        -webkit-mask-image: linear-gradient(160deg, rgba(0,0,0,0.9), rgba(0,0,0,0) 70%);
-        mask-image: linear-gradient(160deg, rgba(0,0,0,0.9), rgba(0,0,0,0) 70%);
-        z-index: 0;
+    .annual-goal-left {
+        flex: 0 0 390px;
+        background: linear-gradient(160deg, #0E1B2E 0%, #1F334F 100%);
+        color: #fff;
+        padding: 28px 26px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+        gap: 14px;
     }
-    .goal-card::after {
-        content: '';
-        position: absolute; right: -30px; bottom: -30px; width: 180px; height: 180px;
-        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23c9a227' stroke-width='1'%3E%3Cpath d='M3 17l6-6 4 4 8-8'/%3E%3Cpath d='M15 7h6v6'/%3E%3C/svg%3E");
-        background-repeat: no-repeat; background-size: contain;
-        opacity: 0.1; z-index: 0; pointer-events: none;
-    }
-    .goal-card > * { position: relative; z-index: 1; }
-    .goal-card .goal-title { position: relative; padding-left: 16px; }
-    .goal-card .goal-title::before {
-        content: ''; position: absolute; left: 0; top: 50%; transform: translateY(-50%);
-        width: 7px; height: 7px; border-radius: 999px; background: #34d399;
+    .annual-goal-headline { display: flex; align-items: center; justify-content: center; gap: 8px; align-self: stretch; }
+    .annual-goal-live-dot {
+        width: 7px; height: 7px; border-radius: 999px; background: #34d399; flex: 0 0 auto;
         box-shadow: 0 0 0 0 rgba(52,211,153,0.55);
         animation: goal-live-pulse 2.2s ease-out infinite;
     }
@@ -671,24 +661,41 @@ $maxTrendValue = max(array_merge(
         100% { box-shadow: 0 0 0 0 rgba(52,211,153,0); }
     }
     @media (prefers-reduced-motion: reduce) {
-        .goal-card .goal-title::before { animation: none; }
+        .annual-goal-live-dot { animation: none; }
     }
-    .goal-card .goal-amount { font-variant-numeric: tabular-nums; }
-    .goal-card .goal-amount::before { content: '฿'; font-size: 0.5em; font-weight: 500; color: rgba(255,255,255,0.55); margin-right: 6px; }
-    .goal-card .stats-grid.six-items-compact .stat-item {
-        background: rgba(255,255,255,0.05);
-        border: 1px solid rgba(255,255,255,0.08);
-        border-radius: 8px;
-        padding: 12px 8px;
-        transition: background 0.2s ease, transform 0.2s ease;
+    .annual-goal-label { font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; color: rgba(255,255,255,0.85); }
+    .annual-goal-label .est { font-weight: 400; color: rgba(255,255,255,0.5); text-transform: none; letter-spacing: normal; }
+    .annual-goal-status { padding: 4px 14px; border-radius: 20px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+    .annual-goal-status.is-on { background: rgba(78,125,87,0.22); color: #8FCB9A; }
+    .annual-goal-status.is-off { background: rgba(178,58,46,0.22); color: #F0958A; }
+    .annual-goal-donut-wrap { position: relative; width: 148px; height: 148px; margin: 6px 0; }
+    .annual-goal-donut { width: 100%; height: 100%; }
+    .annual-goal-donut .track { stroke: rgba(255,255,255,0.14); }
+    .annual-goal-donut .progress { stroke: #C9A227; stroke-linecap: round; transition: stroke-dashoffset 0.6s ease; }
+    .annual-goal-donut-center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+    .annual-goal-donut-center .pct { font-size: 26px; font-weight: 300; color: #fff; font-variant-numeric: tabular-nums; }
+    .annual-goal-donut-center .pct-label { font-size: 10px; color: rgba(255,255,255,0.6); text-transform: uppercase; letter-spacing: 0.05em; margin-top: 2px; }
+    .annual-goal-target-line { font-size: 12px; color: rgba(255,255,255,0.65); line-height: 1.5; }
+    .annual-goal-target-line b { color: #fff; font-weight: 600; font-variant-numeric: tabular-nums; }
+    .annual-goal-right { flex: 1 1 auto; background: #fff; padding: 28px 30px; }
+    .annual-goal-stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px 16px; }
+    .annual-goal-stat { text-align: left; }
+    .annual-goal-stat .stat-label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; margin-bottom: 6px; }
+    .annual-goal-stat .stat-value { font-size: 22px; font-weight: 300; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+    .annual-goal-stat .stat-value.is-positive { color: #4E7D57; }
+    .annual-goal-stat .stat-value.is-negative { color: #B23A2E; }
+    .annual-goal-progress { margin-top: 26px; padding-top: 22px; border-top: 1px solid #F0F0F0; }
+    .annual-goal-progress-label { display: flex; justify-content: space-between; font-size: 12px; color: var(--text-secondary); font-weight: 500; margin-bottom: 8px; }
+    .annual-goal-progress-track { height: 10px; background: #F0F0F0; border-radius: 6px; overflow: hidden; }
+    .annual-goal-progress-fill { height: 100%; border-radius: 6px; transition: width 0.5s ease; }
+    @media (max-width: 900px) {
+        .annual-goal-card { flex-direction: column; }
+        .annual-goal-left { flex: 0 0 auto; }
+        .annual-goal-stats-grid { grid-template-columns: repeat(2, 1fr); }
     }
-    .goal-card .stats-grid.six-items-compact .stat-item:hover {
-        background: rgba(255,255,255,0.09);
-        transform: translateY(-2px);
+    @media (max-width: 480px) {
+        .annual-goal-stats-grid { grid-template-columns: 1fr 1fr; }
     }
-    .goal-card .stat-value { font-variant-numeric: tabular-nums; }
-    .goal-progress-row { display: flex; align-items: center; gap: 25px; }
-    .goal-progress-donut { position: relative; width: 130px; height: 130px; flex-shrink: 0; }
     .row1-grid { display: grid; grid-template-columns: 3fr 2fr; gap: 20px; margin-bottom: 20px; }
     .row1-grid canvas { height: 320px; }
     .channel-legend-row { display: flex; align-items: center; justify-content: center; gap: 40px; padding: 20px 0; }
@@ -708,7 +715,6 @@ $maxTrendValue = max(array_merge(
     }
     @media (max-width: 640px) {
         .kpi-grid { grid-template-columns: 1fr; }
-        .goal-progress-row { flex-direction: column; align-items: stretch; }
         .channel-legend-row { flex-direction: column; gap: 16px; }
         .layer2-grid { grid-template-columns: 1fr; }
         .row1-grid canvas { height: 240px; }
@@ -717,74 +723,82 @@ $maxTrendValue = max(array_merge(
     }
 </style>
         <!-- Annual Goal Tracking -->
-        <div class="goal-card">
-            <div class="goal-header">
-                <div>
-                    <div class="goal-title">Annual Revenue Goal <span style="font-size:11px;font-weight:400;color:rgba(255,255,255,0.55);">(incl. Consignment est.)</span></div>
-                    <div class="goal-amount"><?php echo number_format($mockData['goal']['annual']); ?></div>
+<?php
+// Same formulas as before the redesign — only presentation changed.
+$gap = $mockData['goal']['currentMonth'] - $mockData['goal']['monthlyTarget'];
+$achievement = ($mockData['goal']['monthlyTarget'] > 0) ? ($mockData['goal']['currentMonth'] / $mockData['goal']['monthlyTarget']) * 100 : 0;
+$ytdPct = ($mockData['goal']['annual'] > 0) ? ($mockData['goal']['currentYear'] / $mockData['goal']['annual']) * 100 : 0;
+$isProjectedAhead = $mockData['goal']['projected'] >= $mockData['goal']['annual'];
+
+$donutR = 60;
+$donutCircumference = 2 * M_PI * $donutR;
+$donutOffset = $donutCircumference * (1 - max(0, min(100, $ytdPct)) / 100);
+?>
+        <div class="annual-goal-card">
+            <div class="annual-goal-left">
+                <div class="annual-goal-headline">
+                    <span class="annual-goal-live-dot"></span>
+                    <span class="annual-goal-label">Annual Revenue Goal <span class="est">(incl. Consignment est.)</span></span>
                 </div>
-                <div class="goal-status <?php echo $mockData['goal']['onTrack'] ? 'on-track' : 'off-track'; ?>">
+                <div class="annual-goal-status <?php echo $mockData['goal']['onTrack'] ? 'is-on' : 'is-off'; ?>">
                     <?php echo $mockData['goal']['onTrack'] ? 'On Track' : 'Off Track'; ?>
                 </div>
-            </div>
-
-            <div class="progress-section">
-                <div class="progress-label">
-                    <span>Year-to-Date Progress</span>
-                </div>
-                <div class="goal-progress-row">
-                    <div class="goal-progress-donut">
-                        <canvas id="goalProgressChart"></canvas>
-                        <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; pointer-events: none;">
-                            <div style="font-size: 28px; font-weight: 300; color: white; line-height: 1;"><?php echo number_format(($mockData['goal']['currentYear'] / $mockData['goal']['annual']) * 100, 1); ?>%</div>
-                        </div>
-                    </div>
-                    <div style="flex: 1;">
-                        <div style="font-size: 11px; color: rgba(255,255,255,0.7); margin-bottom: 2px; font-weight: 500;">Achievement</div>
-                        <div style="font-size: 13px; color: rgba(255,255,255,0.9);">Year-to-Date vs Annual Goal</div>
+                <div class="annual-goal-donut-wrap">
+                    <svg class="annual-goal-donut" viewBox="0 0 140 140">
+                        <circle class="track" cx="70" cy="70" r="<?php echo $donutR; ?>" stroke-width="12" fill="none" />
+                        <circle class="progress" cx="70" cy="70" r="<?php echo $donutR; ?>" stroke-width="12" fill="none"
+                            stroke-dasharray="<?php echo round($donutCircumference, 2); ?>"
+                            stroke-dashoffset="<?php echo round($donutOffset, 2); ?>"
+                            transform="rotate(-90 70 70)" />
+                    </svg>
+                    <div class="annual-goal-donut-center">
+                        <div class="pct"><?php echo number_format($ytdPct, 1); ?>%</div>
+                        <div class="pct-label">YTD Progress</div>
                     </div>
                 </div>
+                <div class="annual-goal-target-line">
+                    Target <b>฿<?php echo number_format($mockData['goal']['annual']); ?></b><br>
+                    Current Year <b>฿<?php echo number_format($mockData['goal']['currentYear']); ?></b>
+                </div>
             </div>
-
-<?php
-$gap = $mockData['goal']['currentMonth']
-     - $mockData['goal']['monthlyTarget'];
-$achievement = ($mockData['goal']['currentMonth'] / $mockData['goal']['monthlyTarget']) * 100;
-?>
-
-<div class="stats-grid six-items-compact">
-
-    <div class="stat-item">
-        <div class="stat-label">Current Year</div>
-        <div class="stat-value count-up" data-count-to="<?php echo (int) $mockData['goal']['currentYear']; ?>">0</div>
-    </div>
-
-    <div class="stat-item">
-        <div class="stat-label">Achievement</div>
-        <div class="stat-value count-up" data-count-to="<?php echo $achievement; ?>" data-decimals="1" data-suffix="%" style="color: <?php echo $achievement >= 100 ? '#6ee7b7' : '#fca5a5'; ?>;">0%</div>
-    </div>
-
-    <div class="stat-item">
-        <div class="stat-label">Monthly Target</div>
-        <div class="stat-value count-up" data-count-to="<?php echo (int) $mockData['goal']['monthlyTarget']; ?>">0</div>
-    </div>
-
-    <div class="stat-item">
-        <div class="stat-label">Gap</div>
-        <div class="stat-value count-up" data-count-to="<?php echo (int) $gap; ?>">0</div>
-    </div>
-
-    <div class="stat-item">
-        <div class="stat-label">Current MTD</div>
-        <div class="stat-value count-up" data-count-to="<?php echo (int) $mockData['goal']['currentMonth']; ?>">0</div>
-    </div>
-
-    <div class="stat-item">
-        <div class="stat-label">Projected</div>
-        <div class="stat-value count-up" data-count-to="<?php echo (int) $mockData['goal']['projected']; ?>">0</div>
-    </div>
-</div>
-    </div>
+            <div class="annual-goal-right">
+                <div class="annual-goal-stats-grid">
+                    <div class="annual-goal-stat">
+                        <div class="stat-label">Current Year</div>
+                        <div class="stat-value count-up" data-count-to="<?php echo (int) $mockData['goal']['currentYear']; ?>">0</div>
+                    </div>
+                    <div class="annual-goal-stat">
+                        <div class="stat-label">Achievement</div>
+                        <div class="stat-value count-up <?php echo $achievement >= 100 ? 'is-positive' : 'is-negative'; ?>" data-count-to="<?php echo $achievement; ?>" data-decimals="1" data-suffix="%">0%</div>
+                    </div>
+                    <div class="annual-goal-stat">
+                        <div class="stat-label">Monthly Target</div>
+                        <div class="stat-value count-up" data-count-to="<?php echo (int) $mockData['goal']['monthlyTarget']; ?>">0</div>
+                    </div>
+                    <div class="annual-goal-stat">
+                        <div class="stat-label">Gap</div>
+                        <div class="stat-value count-up <?php echo $gap >= 0 ? 'is-positive' : 'is-negative'; ?>" data-count-to="<?php echo (int) $gap; ?>">0</div>
+                    </div>
+                    <div class="annual-goal-stat">
+                        <div class="stat-label">Current MTD</div>
+                        <div class="stat-value count-up" data-count-to="<?php echo (int) $mockData['goal']['currentMonth']; ?>">0</div>
+                    </div>
+                    <div class="annual-goal-stat">
+                        <div class="stat-label">Projected</div>
+                        <div class="stat-value count-up <?php echo $isProjectedAhead ? 'is-positive' : 'is-negative'; ?>" data-count-to="<?php echo (int) $mockData['goal']['projected']; ?>">0</div>
+                    </div>
+                </div>
+                <div class="annual-goal-progress">
+                    <div class="annual-goal-progress-label">
+                        <span>Monthly Target Progress</span>
+                        <span><?php echo number_format(min(100, $achievement), 0); ?>%</span>
+                    </div>
+                    <div class="annual-goal-progress-track">
+                        <div class="annual-goal-progress-fill" style="width: <?php echo max(0, min(100, $achievement)); ?>%; background: <?php echo $achievement >= 100 ? '#4E7D57' : '#C9A227'; ?>;"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
 
         <!-- Monthly Target Progress -->
         <div class="chart-card">
@@ -1763,56 +1777,6 @@ $achievement = ($mockData['goal']['currentMonth'] / $mockData['goal']['monthlyTa
         });
     }
 
-    // Goal Progress Doughnut Chart
-    const goalProgressCtx = document.getElementById('goalProgressChart').getContext('2d');
-
-    const goalAchievement = <?php echo ($mockData['goal']['currentYear'] / $mockData['goal']['annual']) * 100; ?>;
-    const goalRemaining = 100 - goalAchievement;
-
-    const goalProgressData = {
-        labels: ['Achieved', 'Remaining'],
-        datasets: [{
-            data: [goalAchievement, goalRemaining],
-            backgroundColor: ['#c9a227', 'rgba(255,255,255,0.15)'],
-            borderWidth: 0,
-            circumference: 360,
-            rotation: -90
-        }]
-    };
-
-    const goalProgressChart = new Chart(goalProgressCtx, {
-        type: 'doughnut',
-        data: goalProgressData,
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            cutout: '80%',
-            plugins: {
-                legend: {
-                    display: false
-                },
-                tooltip: {
-                    enabled: true,
-                    backgroundColor: 'rgba(0, 0, 0, 0.8)',
-                    padding: 12,
-                    titleFont: {
-                        size: 13,
-                        weight: 'bold'
-                    },
-                    bodyFont: {
-                        size: 12
-                    },
-                    callbacks: {
-                        label: function(context) {
-                            const label = context.label;
-                            const value = context.raw.toFixed(1) + '%';
-                            return label + ': ' + value;
-                        }
-                    }
-                }
-            }
-        }
-    });
 </script>
 
 <?php require_once __DIR__ . '/includes/footer.php'; ?>
