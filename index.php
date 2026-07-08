@@ -46,6 +46,13 @@ function pct_change(float $current, float $previous): float
     return $previous == 0.0 ? 0.0 : (($current - $previous) / $previous) * 100.0;
 }
 
+function growth_badge_html(float $value, string $suffix = ' vs last month'): string
+{
+    $cls = $value >= 0 ? 'positive' : 'negative';
+    $arrow = $value >= 0 ? '▲' : '▼';
+    return '<div class="change ' . $cls . '">' . $arrow . ' ' . number_format(abs($value), 1) . '%' . $suffix . '</div>';
+}
+
 function request_value(string $key, string $default, array $allowed): string
 {
     $value = isset($_GET[$key]) ? (string) $_GET[$key] : $default;
@@ -441,6 +448,25 @@ $consignmentPeriodEstimate = match ($filterValues['date_range']) {
 $ordersTotal = $onlineOrders + $offlineOrders; // consignment order count unavailable, excluded (same as before)
 $unitsSoldTotal = $onlineUnits + $offlineUnits;
 
+// Prev-period real-only baselines for Orders/UPT/AOV growth — consignment has no real
+// order count, so it's excluded here the same way it's excluded from $ordersTotal above.
+$onlinePrevOrders = (int) n($onlineSummary['prev']['orders'] ?? 0);
+$onlinePrevUnits = n($onlineSummary['prev']['units'] ?? 0);
+$offlinePrevOrders = (int) n($offlineSummary['prev']['orders'] ?? 0);
+$offlinePrevUnits = n($offlineSummary['prev']['units'] ?? 0);
+$prevOrdersTotal = $onlinePrevOrders + $offlinePrevOrders;
+$prevUnitsTotal = $onlinePrevUnits + $offlinePrevUnits;
+$uptTotal = $ordersTotal > 0 ? $unitsSoldTotal / $ordersTotal : 0.0;
+$prevUptTotal = $prevOrdersTotal > 0 ? $prevUnitsTotal / $prevOrdersTotal : 0.0;
+// Real-only AOV (online+offline net sales / real orders) — matches $ordersTotal's scope.
+// Previously this mixed the consignment revenue *estimate* into the numerator while the
+// denominator ($ordersTotal) excluded consignment orders entirely, silently inflating AOV.
+$aovTotalReal = $ordersTotal > 0 ? ($onlineNetSales + $offlineNetSales) / $ordersTotal : 0.0;
+$prevAovTotal = $prevOrdersTotal > 0 ? ($onlinePrevNetSales + $offlinePrevNetSales) / $prevOrdersTotal : 0.0;
+$ordersGrowthReal = $onlineBaselineReliable ? pct_change($ordersTotal, $prevOrdersTotal) : 0.0;
+$uptGrowthReal = $onlineBaselineReliable ? pct_change($uptTotal, $prevUptTotal) : 0.0;
+$aovGrowthReal = $onlineBaselineReliable ? pct_change($aovTotalReal, $prevAovTotal) : 0.0;
+
 $regionalSales = [];
 foreach ($offlineZoneRows as $row) {
     $regionalSales[(string) $row['zone']] = n($row['netSales']);
@@ -537,7 +563,12 @@ $mockData = [
     'growth' => [
         'online' => round($onlineGrowth, 1),
         'offline' => round($offlineGrowth, 1),
-        'total' => $onlineBaselineReliable ? round(pct_change($onlineNetSales + $offlineNetSales, $onlinePrevNetSales + $offlinePrevNetSales), 1) : 0.0
+        'total' => $onlineBaselineReliable ? round(pct_change($onlineNetSales + $offlineNetSales, $onlinePrevNetSales + $offlinePrevNetSales), 1) : 0.0,
+        // Real vs-last-month growth for the Orders/UPT/AOV KPI cards below — previously
+        // these three cards showed hardcoded fake percentages, not computed values at all.
+        'orders' => round($ordersGrowthReal, 1),
+        'upt' => round($uptGrowthReal, 1),
+        'aov' => round($aovGrowthReal, 1),
     ],
     'orders' => [
         'online' => $onlineOrders,
@@ -545,10 +576,11 @@ $mockData = [
         'total' => $ordersTotal
     ],
     'unitsSold' => $unitsSoldTotal,
-    'upt' => $ordersTotal > 0 ? round($unitsSoldTotal / $ordersTotal, 2) : 0,
+    'upt' => round($uptTotal, 2),
 
-    // AOV matches the same filtered period as Revenue/Orders above (not the fixed monthly goal figure).
-    'aov' => $ordersTotal > 0 ? round(($onlineNetSales + $offlineNetSales + $consignmentPeriodEstimate) / $ordersTotal) : 0,
+    // Real-only AOV (online+offline net sales / real orders, consignment excluded) — see
+    // $aovTotalReal comment above for why the consignment estimate was removed from here.
+    'aov' => round($aovTotalReal),
 
     // Dead code below (wrapped in an HTML comment in the markup) — left as-is, out of scope.
     'alerts' => [
@@ -572,7 +604,7 @@ $mockData = [
 $salesChannelBreakdown = [
     ['name'=>'Online','revenue'=>$mockData['totalSales']['online'],'percent'=>round($mockData['totalSales']['online']/$mockData['totalSales']['total']*100,1),'color'=>'#c9a227'],
     ['name'=>'Offline','revenue'=>$mockData['totalSales']['offline'],'percent'=>round($mockData['totalSales']['offline']/$mockData['totalSales']['total']*100,1),'color'=>'#1a1a2e'],
-    ['name'=>'Consignment','revenue'=>$mockData['totalSales']['consignment'],'percent'=>round($mockData['totalSales']['consignment']/$mockData['totalSales']['total']*100,1),'color'=>'#e67e22']
+    ['name'=>'Consignment (est.)','revenue'=>$mockData['totalSales']['consignment'],'percent'=>round($mockData['totalSales']['consignment']/$mockData['totalSales']['total']*100,1),'color'=>'#e67e22']
 ];
 
 // Top online platforms
@@ -598,6 +630,63 @@ $maxTrendValue = max(array_merge(
 ));
 ?>
 <style>
+    .goal-card {
+        position: relative;
+        overflow: hidden;
+        isolation: isolate;
+        background:
+            radial-gradient(circle at 105% -10%, rgba(201,162,39,0.28) 0%, rgba(201,162,39,0) 42%),
+            radial-gradient(circle at -5% 115%, rgba(58,79,140,0.30) 0%, rgba(58,79,140,0) 48%),
+            linear-gradient(160deg, #0c1220 0%, #1a1a2e 100%) !important;
+        border-left: none !important;
+        box-shadow: 0 10px 28px rgba(12,18,32,0.28) !important;
+    }
+    .goal-card::before {
+        content: '';
+        position: absolute; inset: 0;
+        background-image: radial-gradient(rgba(255,255,255,0.06) 1px, transparent 1px);
+        background-size: 16px 16px;
+        -webkit-mask-image: linear-gradient(160deg, rgba(0,0,0,0.9), rgba(0,0,0,0) 70%);
+        mask-image: linear-gradient(160deg, rgba(0,0,0,0.9), rgba(0,0,0,0) 70%);
+        z-index: 0;
+    }
+    .goal-card::after {
+        content: '';
+        position: absolute; right: -30px; bottom: -30px; width: 180px; height: 180px;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23c9a227' stroke-width='1'%3E%3Cpath d='M3 17l6-6 4 4 8-8'/%3E%3Cpath d='M15 7h6v6'/%3E%3C/svg%3E");
+        background-repeat: no-repeat; background-size: contain;
+        opacity: 0.1; z-index: 0; pointer-events: none;
+    }
+    .goal-card > * { position: relative; z-index: 1; }
+    .goal-card .goal-title { position: relative; padding-left: 16px; }
+    .goal-card .goal-title::before {
+        content: ''; position: absolute; left: 0; top: 50%; transform: translateY(-50%);
+        width: 7px; height: 7px; border-radius: 999px; background: #34d399;
+        box-shadow: 0 0 0 0 rgba(52,211,153,0.55);
+        animation: goal-live-pulse 2.2s ease-out infinite;
+    }
+    @keyframes goal-live-pulse {
+        0% { box-shadow: 0 0 0 0 rgba(52,211,153,0.55); }
+        70% { box-shadow: 0 0 0 6px rgba(52,211,153,0); }
+        100% { box-shadow: 0 0 0 0 rgba(52,211,153,0); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+        .goal-card .goal-title::before { animation: none; }
+    }
+    .goal-card .goal-amount { font-variant-numeric: tabular-nums; }
+    .goal-card .goal-amount::before { content: '฿'; font-size: 0.5em; font-weight: 500; color: rgba(255,255,255,0.55); margin-right: 6px; }
+    .goal-card .stats-grid.six-items-compact .stat-item {
+        background: rgba(255,255,255,0.05);
+        border: 1px solid rgba(255,255,255,0.08);
+        border-radius: 8px;
+        padding: 12px 8px;
+        transition: background 0.2s ease, transform 0.2s ease;
+    }
+    .goal-card .stats-grid.six-items-compact .stat-item:hover {
+        background: rgba(255,255,255,0.09);
+        transform: translateY(-2px);
+    }
+    .goal-card .stat-value { font-variant-numeric: tabular-nums; }
     .goal-progress-row { display: flex; align-items: center; gap: 25px; }
     .goal-progress-donut { position: relative; width: 130px; height: 130px; flex-shrink: 0; }
     .row1-grid { display: grid; grid-template-columns: 3fr 2fr; gap: 20px; margin-bottom: 20px; }
@@ -606,6 +695,8 @@ $maxTrendValue = max(array_merge(
     .channel-donut-wrap { position: relative; width: 180px; height: 180px; flex-shrink: 0; }
     .channel-legend-col { flex: 1; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
     .layer2-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 25px; }
+    .kpi-grid { margin-top: 30px; }
+    .kpi-grid .kpi-card { padding: 28px 25px; }
     .row2-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
     .row2-grid canvas { height: 280px; }
     .row3-grid { display: grid; grid-template-columns: 1fr; gap: 20px; margin-bottom: 20px; }
@@ -629,7 +720,7 @@ $maxTrendValue = max(array_merge(
         <div class="goal-card">
             <div class="goal-header">
                 <div>
-                    <div class="goal-title">Annual Revenue Goal</div>
+                    <div class="goal-title">Annual Revenue Goal <span style="font-size:11px;font-weight:400;color:rgba(255,255,255,0.55);">(incl. Consignment est.)</span></div>
                     <div class="goal-amount"><?php echo number_format($mockData['goal']['annual']); ?></div>
                 </div>
                 <div class="goal-status <?php echo $mockData['goal']['onTrack'] ? 'on-track' : 'off-track'; ?>">
@@ -701,15 +792,21 @@ $achievement = ($mockData['goal']['currentMonth'] / $mockData['goal']['monthlyTa
             <div style="display: flex; flex-direction: column; gap: 20px;">
                 <?php
                 $channels = [
-                    ['name' => 'Online', 'current' => $mockData['monthlyActual']['online'], 'target' => $mockData['monthlyTargets']['online'], 'color' => '#c9a227'],
-                    ['name' => 'Offline', 'current' => $mockData['monthlyActual']['offline'], 'target' => $mockData['monthlyTargets']['offline'], 'color' => '#1a1a2e'],
-                    ['name' => 'Consignment', 'current' => $mockData['monthlyActual']['consignment'], 'target' => $mockData['monthlyTargets']['consignment'], 'color' => '#e67e22']
+                    ['name' => 'Online', 'current' => $mockData['monthlyActual']['online'], 'target' => $mockData['monthlyTargets']['online'], 'color' => '#c9a227', 'isEstimate' => false],
+                    ['name' => 'Offline', 'current' => $mockData['monthlyActual']['offline'], 'target' => $mockData['monthlyTargets']['offline'], 'color' => '#1a1a2e', 'isEstimate' => false],
+                    ['name' => 'Consignment', 'current' => $mockData['monthlyActual']['consignment'], 'target' => $mockData['monthlyTargets']['consignment'], 'color' => '#e67e22', 'isEstimate' => true],
                 ];
                 foreach ($channels as $channel):
                     $progress = min(100, ($channel['current'] / $channel['target']) * 100);
                     $isOnTrack = $channel['current'] >= $channel['target'];
                     $statusColor = $isOnTrack ? '#10b981' : '#ef4444';
                     $statusText = $isOnTrack ? 'On Track' : 'Behind';
+                    // Consignment has no real sales source yet — both figures are mock, so
+                    // an "On Track"/"Behind" verdict here would be fabricated, not measured.
+                    if ($channel['isEstimate']) {
+                        $statusColor = '#9CA3AF';
+                        $statusText = 'Estimate (mock)';
+                    }
                 ?>
                 <div>
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
@@ -719,7 +816,7 @@ $achievement = ($mockData['goal']['currentMonth'] / $mockData['goal']['monthlyTa
                         </div>
                         <div style="display: flex; align-items: center; gap: 15px;">
                             <span style="font-size: 12px; color: #6B7280;">Target: <?php echo number_format($channel['target'] / 1000000, 1); ?>M</span>
-                            <span style="font-size: 11px; color: <?php echo $statusColor; ?>; font-weight: 600; background: <?php echo $isOnTrack ? '#d1fae5' : '#fee2e2'; ?>; padding: 2px 8px; border-radius: 3px;"><?php echo $statusText; ?></span>
+                            <span style="font-size: 11px; color: <?php echo $statusColor; ?>; font-weight: 600; background: <?php echo $channel['isEstimate'] ? '#F3F4F6' : ($isOnTrack ? '#d1fae5' : '#fee2e2'); ?>; padding: 2px 8px; border-radius: 3px;"><?php echo $statusText; ?></span>
                         </div>
                     </div>
                     <div style="position: relative; height: 24px; background: #f5f5f5; border-radius: 4px; overflow: hidden;">
@@ -766,25 +863,21 @@ $achievement = ($mockData['goal']['currentMonth'] / $mockData['goal']['monthlyTa
 <div class="kpi-grid">
 
     <div class="kpi-card" onclick="scrollToSection('channel-contribution')">
-        <div class="tooltip">Total sales from all channels</div>
-        <div class="label">Revenue</div>
+        <div class="tooltip">Total sales from all channels. Includes a Consignment estimate — no real consignment sales source exists yet.</div>
+        <div class="label">Revenue <span style="color:#9CA3AF;font-weight:400;text-transform:none;">(incl. Consignment est.)</span></div>
         <div class="value">
             <?php echo number_format($mockData['totalSales']['total']); ?>
         </div>
-        <div class="change positive">
-            ▲ <?php echo $mockData['growth']['total']; ?>% vs last month
-        </div>
+        <?php echo growth_badge_html($mockData['growth']['total']); ?>
     </div>
 
     <div class="kpi-card" onclick="scrollToSection('top-products')">
-        <div class="tooltip">Total number of orders</div>
+        <div class="tooltip">Total number of orders (Online + Offline — Consignment has no real order count)</div>
         <div class="label">Orders</div>
         <div class="value">
             <?php echo number_format($mockData['orders']['total']); ?>
         </div>
-        <div class="change positive">
-            ▲ 10.2% vs last month
-        </div>
+        <?php echo growth_badge_html($mockData['growth']['orders']); ?>
     </div>
 
     <div class="kpi-card" onclick="scrollToSection('top-products')">
@@ -793,20 +886,16 @@ $achievement = ($mockData['goal']['currentMonth'] / $mockData['goal']['monthlyTa
         <div class="value">
             <?php echo number_format($mockData['upt'], 2); ?>
         </div>
-        <div class="change positive">
-            ▲ 8.7% vs last month
-        </div>
+        <?php echo growth_badge_html($mockData['growth']['upt']); ?>
     </div>
 
     <div class="kpi-card" onclick="scrollToSection('top-products')">
-        <div class="tooltip">AOV = Revenue ÷ Orders</div>
+        <div class="tooltip">AOV = (Online + Offline Revenue) ÷ Orders. Consignment excluded — no real order count to divide by.</div>
         <div class="label">Average Order Value</div>
         <div class="value">
             <?php echo number_format($mockData['aov']); ?>
         </div>
-        <div class="change positive">
-            ▲ 8.1% vs last month
-        </div>
+        <?php echo growth_badge_html($mockData['growth']['aov']); ?>
     </div>
 
 </div>
@@ -885,7 +974,7 @@ $achievement = ($mockData['goal']['currentMonth'] / $mockData['goal']['monthlyTa
                                     <div style="display: flex; align-items: center; gap: 8px;">
                                         <span style="display: inline-block; width: 20px; height: 20px; line-height: 20px; text-align: center; border-radius: 50%; background: <?php echo $location['type'] == 'offline' ? '#1a1a2e' : '#e67e22'; ?>; color: white; font-size: 10px; font-weight: 600;"><?php echo $index + 1; ?></span>
                                         <span style="font-size: 12px; color: #111827; font-weight: 500;"><?php echo htmlspecialchars($location['name']); ?></span>
-                                        <span style="font-size: 9px; color: #9CA3AF; background: <?php echo $location['type'] == 'offline' ? '#f0f0f0' : '#fff3e0'; ?>; padding: 2px 6px; border-radius: 3px; text-transform: uppercase;"><?php echo $location['type']; ?></span>
+                                        <span style="font-size: 9px; color: #9CA3AF; background: <?php echo $location['type'] == 'offline' ? '#f0f0f0' : '#fff3e0'; ?>; padding: 2px 6px; border-radius: 3px; text-transform: uppercase;"><?php echo $location['type'] == 'offline' ? 'offline' : 'consignment (est.)'; ?></span>
                                     </div>
                                 </td>
                                 <td style="padding: 8px 0; border-bottom: 1px solid #f5f5f5; text-align: right;">
@@ -985,7 +1074,7 @@ $achievement = ($mockData['goal']['currentMonth'] / $mockData['goal']['monthlyTa
                 order: 3
             },
             {
-                label: 'Consignment Revenue',
+                label: 'Consignment Revenue (est.)',
                 data: <?php echo json_encode(array_column($mockData['monthlyTrend'], 'consignment')); ?>,
                 type: 'bar',
                 backgroundColor: '#e67e22',
