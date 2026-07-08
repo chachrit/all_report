@@ -332,32 +332,38 @@ if ($filterValues['date_range'] === 'today') {
 $offlineSummaryRows = fetch_all($conn, "
     SELECT 'current' AS period, COUNT(DISTINCT f.SourceDocNo) AS orders, SUM(f.Quantity) AS units, SUM(f.NetTotal) AS netSales
     FROM FactSales f JOIN DimBranch b ON f.BranchKey = b.BranchKey JOIN DimProduct p ON f.ProductKey = p.ProductKey
-    WHERE f.DateKey >= {$offlinePeriodStartKey} AND f.DateKey < {$offlinePeriodEndKey} AND " . RETAIL_BRANCH_SQL . " AND " . SELLABLE_PRODUCT_SQL . "
+    WHERE f.DateKey >= ? AND f.DateKey < ? AND " . RETAIL_BRANCH_SQL . " AND " . SELLABLE_PRODUCT_SQL . "
 
     UNION ALL
 
     SELECT 'prev' AS period, COUNT(DISTINCT f.SourceDocNo) AS orders, SUM(f.Quantity) AS units, SUM(f.NetTotal) AS netSales
     FROM FactSales f JOIN DimBranch b ON f.BranchKey = b.BranchKey JOIN DimProduct p ON f.ProductKey = p.ProductKey
-    WHERE f.DateKey >= {$offlineTargetStartKey} AND f.DateKey < {$offlineTargetEndKey} AND " . RETAIL_BRANCH_SQL . " AND " . SELLABLE_PRODUCT_SQL . "
+    WHERE f.DateKey >= ? AND f.DateKey < ? AND " . RETAIL_BRANCH_SQL . " AND " . SELLABLE_PRODUCT_SQL . "
 
     UNION ALL
 
     SELECT 'ytd' AS period, COUNT(DISTINCT f.SourceDocNo) AS orders, SUM(f.Quantity) AS units, SUM(f.NetTotal) AS netSales
     FROM FactSales f JOIN DimBranch b ON f.BranchKey = b.BranchKey JOIN DimProduct p ON f.ProductKey = p.ProductKey
-    WHERE f.DateKey >= {$offlineYearStartKey} AND f.DateKey < {$offlineMtdEndKey} AND " . RETAIL_BRANCH_SQL . " AND " . SELLABLE_PRODUCT_SQL . "
+    WHERE f.DateKey >= ? AND f.DateKey < ? AND " . RETAIL_BRANCH_SQL . " AND " . SELLABLE_PRODUCT_SQL . "
 
     UNION ALL
 
     SELECT 'month' AS period, COUNT(DISTINCT f.SourceDocNo) AS orders, SUM(f.Quantity) AS units, SUM(f.NetTotal) AS netSales
     FROM FactSales f JOIN DimBranch b ON f.BranchKey = b.BranchKey JOIN DimProduct p ON f.ProductKey = p.ProductKey
-    WHERE f.DateKey >= {$offlineMtdStartKey} AND f.DateKey < {$offlineMtdEndKey} AND " . RETAIL_BRANCH_SQL . " AND " . SELLABLE_PRODUCT_SQL . "
+    WHERE f.DateKey >= ? AND f.DateKey < ? AND " . RETAIL_BRANCH_SQL . " AND " . SELLABLE_PRODUCT_SQL . "
 
     UNION ALL
 
     SELECT 'prev_month' AS period, COUNT(DISTINCT f.SourceDocNo) AS orders, SUM(f.Quantity) AS units, SUM(f.NetTotal) AS netSales
     FROM FactSales f JOIN DimBranch b ON f.BranchKey = b.BranchKey JOIN DimProduct p ON f.ProductKey = p.ProductKey
-    WHERE f.DateKey >= {$offlinePrevMonthStartKey} AND f.DateKey < {$offlineMtdStartKey} AND " . RETAIL_BRANCH_SQL . " AND " . SELLABLE_PRODUCT_SQL . ";
-");
+    WHERE f.DateKey >= ? AND f.DateKey < ? AND " . RETAIL_BRANCH_SQL . " AND " . SELLABLE_PRODUCT_SQL . ";
+", [
+    $offlinePeriodStartKey, $offlinePeriodEndKey,
+    $offlineTargetStartKey, $offlineTargetEndKey,
+    $offlineYearStartKey, $offlineMtdEndKey,
+    $offlineMtdStartKey, $offlineMtdEndKey,
+    $offlinePrevMonthStartKey, $offlineMtdStartKey,
+]);
 $offlineSummary = ['current' => [], 'prev' => [], 'ytd' => [], 'month' => [], 'prev_month' => []];
 foreach ($offlineSummaryRows as $row) {
     $offlineSummary[$row['period']] = $row;
@@ -374,33 +380,33 @@ $offlineGrowth = pct_change($offlineNetSales, $offlinePrevNetSales);
 $offlineBranchRows = fetch_all($conn, "
     SELECT b.BranchName, COUNT(DISTINCT f.SourceDocNo) AS orders, SUM(f.NetTotal) AS netSales
     FROM FactSales f JOIN DimBranch b ON f.BranchKey = b.BranchKey JOIN DimProduct p ON f.ProductKey = p.ProductKey
-    WHERE f.DateKey >= {$offlinePeriodStartKey} AND f.DateKey < {$offlinePeriodEndKey} AND " . RETAIL_BRANCH_SQL . " AND " . SELLABLE_PRODUCT_SQL . "
+    WHERE f.DateKey >= ? AND f.DateKey < ? AND " . RETAIL_BRANCH_SQL . " AND " . SELLABLE_PRODUCT_SQL . "
     GROUP BY b.BranchName
     ORDER BY netSales DESC;
-");
+", [$offlinePeriodStartKey, $offlinePeriodEndKey]);
 
 $offlineZoneRows = fetch_all($conn, "
     SELECT " . zone_case_sql() . " AS zone, SUM(f.NetTotal) AS netSales
     FROM FactSales f JOIN DimBranch b ON f.BranchKey = b.BranchKey JOIN DimProduct p ON f.ProductKey = p.ProductKey
-    WHERE f.DateKey >= {$offlinePeriodStartKey} AND f.DateKey < {$offlinePeriodEndKey} AND " . RETAIL_BRANCH_SQL . " AND " . SELLABLE_PRODUCT_SQL . "
+    WHERE f.DateKey >= ? AND f.DateKey < ? AND " . RETAIL_BRANCH_SQL . " AND " . SELLABLE_PRODUCT_SQL . "
     GROUP BY " . zone_case_sql() . ";
-");
+", [$offlinePeriodStartKey, $offlinePeriodEndKey]);
 
 $offlineTopProductRows = fetch_all($conn, "
     SELECT TOP 5 p.ProductCode, p.ProductName, SUM(f.Quantity) AS units, SUM(f.NetTotal) AS netSales
     FROM FactSales f JOIN DimBranch b ON f.BranchKey = b.BranchKey JOIN DimProduct p ON f.ProductKey = p.ProductKey
-    WHERE f.DateKey >= {$offlinePeriodStartKey} AND f.DateKey < {$offlinePeriodEndKey} AND " . RETAIL_BRANCH_SQL . " AND " . SELLABLE_PRODUCT_SQL . "
+    WHERE f.DateKey >= ? AND f.DateKey < ? AND " . RETAIL_BRANCH_SQL . " AND " . SELLABLE_PRODUCT_SQL . "
     GROUP BY p.ProductCode, p.ProductName
     ORDER BY netSales DESC;
-");
+", [$offlinePeriodStartKey, $offlinePeriodEndKey]);
 
 $offlineTrendStartKey = (int) (clone $offlineMtdStart)->modify("-{$trendMonthsBack} months")->format('Ymd');
 $offlineTrendRows = fetch_all($conn, "
     SELECT LEFT(CAST(f.DateKey AS varchar(8)), 6) AS ym, SUM(f.NetTotal) AS netSales
     FROM FactSales f JOIN DimBranch b ON f.BranchKey = b.BranchKey JOIN DimProduct p ON f.ProductKey = p.ProductKey
-    WHERE f.DateKey >= {$offlineTrendStartKey} AND f.DateKey < {$offlineMtdEndKey} AND " . RETAIL_BRANCH_SQL . " AND " . SELLABLE_PRODUCT_SQL . "
+    WHERE f.DateKey >= ? AND f.DateKey < ? AND " . RETAIL_BRANCH_SQL . " AND " . SELLABLE_PRODUCT_SQL . "
     GROUP BY LEFT(CAST(f.DateKey AS varchar(8)), 6);
-");
+", [$offlineTrendStartKey, $offlineMtdEndKey]);
 $offlineTrendByMonth = [];
 foreach ($offlineTrendRows as $row) {
     // DateKey-derived 'yyyyMM' -> 'yyyy-MM' to match the Online trend's key format
@@ -708,6 +714,7 @@ $maxTrendValue = max(array_merge(
     .row2-grid canvas { height: 280px; }
     .row3-grid { display: grid; grid-template-columns: 1fr; gap: 20px; margin-bottom: 20px; }
     .row3-grid canvas { height: 220px; }
+    .row1-grid > *, .row2-grid > *, .row3-grid > *, .layer2-grid > * { min-width: 0; }
 
     @media (max-width: 1100px) {
         .kpi-grid { grid-template-columns: repeat(2, 1fr); }

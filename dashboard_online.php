@@ -457,7 +457,13 @@ if ($yoyStart >= RELIABLE_DATA_FROM) {
 }
 
 $periodLabel = (new DateTime($periodStart))->format('M j') . ' - ' . (new DateTime($periodEnd))->modify('-1 day')->format('M j, Y');
-$productGroupSql = product_group_case('i.product_name');
+/**
+ * i.product_group is a persisted computed column on fact_online_order_items (see
+ * scripts/add_product_group_column.sql) precomputing this exact CASE expression —
+ * verified to match product_group_case() row-for-row. Reading the indexed column
+ * avoids re-evaluating 6 LIKE patterns per row on every request.
+ */
+$productGroupSql = 'i.product_group';
 
 /**
  * fact_online_orders (order header) and fact_online_order_items (line items) replace
@@ -474,7 +480,7 @@ if ($filterValues['branch'] !== 'all') {
     append_filter($headerConditions, $headerParams, 'o.platform = ?', $filterValues['branch']);
 }
 if ($filterValues['category'] !== 'all') {
-    append_filter($itemConditions, $itemParams, product_group_case('i.product_name') . ' = ?', $filterValues['category']);
+    append_filter($itemConditions, $itemParams, 'i.product_group = ?', $filterValues['category']);
 }
 // Snapshot before the campaign condition below — the tier-trend chart needs to show
 // all three discount tiers regardless of which one the Campaign filter has selected.
@@ -1194,10 +1200,10 @@ require_once __DIR__ . '/includes/header.php';
     </div>
 </div>
 
-<div class="split-grid">
+<div class="split-grid max-[900px]:grid-cols-1">
     <div class="table-card">
         <h3><?php echo htmlspecialchars(ui_text($ui, 'platform_performance')); ?></h3>
-        <table>
+        <div class="max-[640px]:overflow-x-auto"><table>
             <thead>
             <tr>
                 <th><?php echo htmlspecialchars(ui_text($ui, 'platform')); ?></th>
@@ -1218,13 +1224,13 @@ require_once __DIR__ . '/includes/header.php';
                 </tr>
             <?php endforeach; ?>
             </tbody>
-        </table>
+        </table></div>
     </div>
 
     <div class="table-card">
         <h3><?php echo htmlspecialchars(ui_text($ui, 'top_products')); ?></h3>
         <div class="table-note"><?php echo htmlspecialchars(sprintf(ui_text($ui, 'gift_excluded'), ui_text($ui, $filterValues['date_range']))); ?></div>
-        <table>
+        <div class="max-[640px]:overflow-x-auto"><table>
             <thead>
             <tr>
                 <th><?php echo htmlspecialchars(ui_text($ui, 'product')); ?></th>
@@ -1249,7 +1255,7 @@ require_once __DIR__ . '/includes/header.php';
                 </tr>
             <?php endforeach; ?>
             </tbody>
-        </table>
+        </table></div>
     </div>
 </div>
 
@@ -1295,14 +1301,14 @@ require_once __DIR__ . '/includes/header.php';
     </div>
 </div>
 
-<div class="split-grid">
+<div class="split-grid max-[900px]:grid-cols-1">
     <div class="table-card">
         <h3><?php echo htmlspecialchars(ui_text($ui, 'cancel_watch_title')); ?><?php echo hint_icon(ui_text($ui, 'tooltip_cancel_watch')); ?></h3>
         <div class="table-note"><?php echo htmlspecialchars(ui_text($ui, 'cancel_watch_subtitle')); ?> · <?php echo htmlspecialchars($latestCompleteDate->format('j M Y')); ?></div>
         <?php if (empty($cancelWatch)): ?>
             <div class="ok-state"><span class="dot"></span><?php echo htmlspecialchars(ui_text($ui, 'cancel_watch_ok')); ?></div>
         <?php else: ?>
-            <table>
+            <div class="max-[640px]:overflow-x-auto"><table>
                 <thead>
                 <tr>
                     <th><?php echo htmlspecialchars(ui_text($ui, 'platform')); ?></th>
@@ -1321,7 +1327,7 @@ require_once __DIR__ . '/includes/header.php';
                     </tr>
                 <?php endforeach; ?>
                 </tbody>
-            </table>
+            </table></div>
         <?php endif; ?>
     </div>
 
@@ -1331,7 +1337,7 @@ require_once __DIR__ . '/includes/header.php';
         <?php if (empty($attentionPlatforms)): ?>
             <div class="ok-state"><span class="dot"></span><?php echo htmlspecialchars(ui_text($ui, 'attention_ok')); ?></div>
         <?php else: ?>
-            <table>
+            <div class="max-[640px]:overflow-x-auto"><table>
                 <thead>
                 <tr>
                     <th><?php echo htmlspecialchars(ui_text($ui, 'platform')); ?></th>
@@ -1352,7 +1358,7 @@ require_once __DIR__ . '/includes/header.php';
                     </tr>
                 <?php endforeach; ?>
                 </tbody>
-            </table>
+            </table></div>
         <?php endif; ?>
     </div>
 </div>
@@ -1363,7 +1369,7 @@ require_once __DIR__ . '/includes/header.php';
     <?php if (empty($discountAnomalies)): ?>
         <div class="ok-state"><span class="dot"></span><?php echo htmlspecialchars(ui_text($ui, 'disc_anomaly_ok')); ?></div>
     <?php else: ?>
-        <table>
+        <div class="max-[640px]:overflow-x-auto"><table>
             <thead>
             <tr>
                 <th><?php echo htmlspecialchars(ui_text($ui, 'platform')); ?></th>
@@ -1384,7 +1390,7 @@ require_once __DIR__ . '/includes/header.php';
                 </tr>
             <?php endforeach; ?>
             </tbody>
-        </table>
+        </table></div>
     <?php endif; ?>
 </div>
 

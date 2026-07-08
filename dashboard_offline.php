@@ -1071,14 +1071,14 @@ require_once __DIR__ . '/includes/header.php';
     </div>
 </div>
 
-<div class="split-grid">
+<div class="split-grid max-[900px]:grid-cols-1">
     <div class="table-card">
         <h3><?php echo htmlspecialchars(ui_text($ui, 'branch_performance')); ?> <span class="hint">(<?php echo htmlspecialchars(ui_text($ui, 'chart_click_hint')); ?>)</span></h3>
         <div class="table-note"><?php echo htmlspecialchars(ui_text($ui, 'top_branch')); ?> <?php echo htmlspecialchars($topBranch['BranchName'] ?? '-'); ?> · <?php echo htmlspecialchars(ui_text($ui, 'top_product')); ?> <?php echo htmlspecialchars($topProduct['ProductName'] ?? '-'); ?></div>
         <div class="chart-box"><canvas id="branchPerfChart"></canvas></div>
         <details>
             <summary><?php echo htmlspecialchars($viewAllBranchesLabel); ?></summary>
-            <table>
+            <div class="max-[640px]:overflow-x-auto"><table>
                 <thead>
                 <tr>
                     <th><?php echo htmlspecialchars(ui_text($ui, 'branch_col')); ?></th>
@@ -1099,7 +1099,7 @@ require_once __DIR__ . '/includes/header.php';
                     </tr>
                 <?php endforeach; ?>
                 </tbody>
-            </table>
+            </table></div>
         </details>
     </div>
 
@@ -1108,7 +1108,7 @@ require_once __DIR__ . '/includes/header.php';
         <div class="chart-box"><canvas id="topProductsChart"></canvas></div>
         <details>
             <summary><?php echo htmlspecialchars($viewAllProductsLabel); ?></summary>
-            <table>
+            <div class="max-[640px]:overflow-x-auto"><table>
                 <thead>
                 <tr>
                     <th><?php echo htmlspecialchars(ui_text($ui, 'product_col')); ?></th>
@@ -1132,7 +1132,7 @@ require_once __DIR__ . '/includes/header.php';
                     </tr>
                 <?php endforeach; ?>
                 </tbody>
-            </table>
+            </table></div>
         </details>
     </div>
 </div>
@@ -1173,14 +1173,14 @@ require_once __DIR__ . '/includes/header.php';
     </div>
 </div>
 
-<div class="split-grid">
+<div class="split-grid max-[900px]:grid-cols-1">
     <div class="table-card">
         <h3><?php echo htmlspecialchars(ui_text($ui, 'attention_title')); ?><?php echo info_tip($ui, 'tip_attention'); ?></h3>
         <div class="table-note"><?php echo htmlspecialchars(ui_text($ui, 'attention_subtitle')); ?> · <?php echo htmlspecialchars($maxDate->format('j M Y')); ?></div>
         <?php if (empty($attentionBranches)): ?>
             <div class="ok-state"><span class="dot"></span><?php echo htmlspecialchars(ui_text($ui, 'attention_ok')); ?></div>
         <?php else: ?>
-            <table>
+            <div class="max-[640px]:overflow-x-auto"><table>
                 <thead>
                 <tr>
                     <th><?php echo htmlspecialchars(ui_text($ui, 'branch_col')); ?></th>
@@ -1201,7 +1201,7 @@ require_once __DIR__ . '/includes/header.php';
                     </tr>
                 <?php endforeach; ?>
                 </tbody>
-            </table>
+            </table></div>
         <?php endif; ?>
     </div>
 
@@ -1211,7 +1211,7 @@ require_once __DIR__ . '/includes/header.php';
         <?php if (empty($stallItems)): ?>
             <div class="ok-state"><span class="dot"></span><?php echo htmlspecialchars(ui_text($ui, 'stall_ok')); ?></div>
         <?php else: ?>
-            <table>
+            <div class="max-[640px]:overflow-x-auto"><table>
                 <thead>
                 <tr>
                     <th><?php echo htmlspecialchars(ui_text($ui, 'branch_col')); ?></th>
@@ -1237,7 +1237,7 @@ require_once __DIR__ . '/includes/header.php';
                     </tr>
                 <?php endforeach; ?>
                 </tbody>
-            </table>
+            </table></div>
         <?php endif; ?>
     </div>
 </div>
@@ -1248,7 +1248,7 @@ require_once __DIR__ . '/includes/header.php';
     <?php if (empty($discountAnomalies)): ?>
         <div class="ok-state"><span class="dot"></span><?php echo htmlspecialchars(ui_text($ui, 'disc_anomaly_ok')); ?></div>
     <?php else: ?>
-        <table>
+        <div class="max-[640px]:overflow-x-auto"><table>
             <thead>
             <tr>
                 <th><?php echo htmlspecialchars(ui_text($ui, 'branch_col')); ?></th>
@@ -1269,7 +1269,7 @@ require_once __DIR__ . '/includes/header.php';
                 </tr>
             <?php endforeach; ?>
             </tbody>
-        </table>
+        </table></div>
     <?php endif; ?>
 </div>
 
@@ -1277,7 +1277,7 @@ require_once __DIR__ . '/includes/header.php';
     <h3><?php echo htmlspecialchars(ui_text($ui, 'heatmap_title')); ?><?php echo info_tip($ui, 'tip_heatmap'); ?></h3>
     <div class="table-note"><?php echo htmlspecialchars(ui_text($ui, 'heatmap_subtitle')); ?></div>
     <div class="heatmap-scroll">
-        <table class="heatmap-table">
+        <div class="max-[640px]:overflow-x-auto"><table class="heatmap-table">
             <thead>
             <tr>
                 <th><?php echo htmlspecialchars(ui_text($ui, 'branch_col')); ?></th>
@@ -1303,7 +1303,7 @@ require_once __DIR__ . '/includes/header.php';
                 </tr>
             <?php endforeach; ?>
             </tbody>
-        </table>
+        </table></div>
     </div>
 </div>
 

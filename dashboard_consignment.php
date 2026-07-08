@@ -74,7 +74,7 @@ $accentColor  = '#8b5cf6';
 require_once __DIR__ . '/includes/header.php';
 ?>
         <!-- KPI Cards -->
-        <div class="kpi-grid">
+        <div class="kpi-grid max-[900px]:grid-cols-2 max-[480px]:grid-cols-1">
             <div class="kpi-card">
                 <div class="label">Total Revenue</div>
                 <div class="value"><?php echo number_format($mockData['totalRevenue']); ?></div>
@@ -98,7 +98,7 @@ require_once __DIR__ . '/includes/header.php';
         </div>
 
         <!-- Charts Section -->
-        <div class="charts-grid">
+        <div class="charts-grid max-[900px]:grid-cols-1">
             <div class="chart-card">
                 <h3>Monthly Consignment Revenue Trend</h3>
                 <div style="padding: 20px 0;">
@@ -137,7 +137,7 @@ require_once __DIR__ . '/includes/header.php';
         <!-- Partner Performance -->
         <div class="table-card">
             <h3>Partner Performance</h3>
-            <table>
+            <div class="max-[640px]:overflow-x-auto"><table>
                 <thead>
                     <tr>
                         <th>Partner</th>
@@ -160,13 +160,13 @@ require_once __DIR__ . '/includes/header.php';
                     </tr>
                     <?php endforeach; ?>
                 </tbody>
-            </table>
+            </table></div>
         </div>
 
         <!-- Branch Performance -->
         <div class="table-card">
             <h3>Branch Performance (Top 10)</h3>
-            <table>
+            <div class="max-[640px]:overflow-x-auto"><table>
                 <thead>
                     <tr>
                         <th>Branch</th>
@@ -189,13 +189,13 @@ require_once __DIR__ . '/includes/header.php';
                     </tr>
                     <?php endforeach; ?>
                 </tbody>
-            </table>
+            </table></div>
         </div>
 
         <!-- Top Selling Products -->
         <div class="table-card">
             <h3>Top Selling Products (Consignment)</h3>
-            <table>
+            <div class="max-[640px]:overflow-x-auto"><table>
                 <thead>
                     <tr>
                         <th>Product</th>
@@ -216,13 +216,13 @@ require_once __DIR__ . '/includes/header.php';
                     </tr>
                     <?php endforeach; ?>
                 </tbody>
-            </table>
+            </table></div>
         </div>
 
         <!-- Inventory Status -->
         <div class="table-card">
             <h3>Inventory Status</h3>
-            <table>
+            <div class="max-[640px]:overflow-x-auto"><table>
                 <thead>
                     <tr>
                         <th>Partner</th>
@@ -243,7 +243,7 @@ require_once __DIR__ . '/includes/header.php';
                     </tr>
                     <?php endforeach; ?>
                 </tbody>
-            </table>
+            </table></div>
         </div>
 
 <script>
