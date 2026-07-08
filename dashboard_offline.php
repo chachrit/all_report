@@ -825,22 +825,70 @@ require_once __DIR__ . '/includes/header.php';
 ?>
 
 <style>
-    .offline-hero { background: #1a1a2e; color: #fff; padding: 28px; border-radius: 8px; margin-bottom: 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
-    .offline-hero-top { display: flex; justify-content: space-between; gap: 24px; align-items: flex-start; }
+    .offline-hero {
+        position: relative;
+        overflow: hidden;
+        isolation: isolate;
+        background:
+            radial-gradient(circle at 105% -10%, rgba(122,139,255,0.25) 0%, rgba(122,139,255,0) 42%),
+            radial-gradient(circle at -5% 115%, rgba(58,79,140,0.30) 0%, rgba(58,79,140,0) 48%),
+            linear-gradient(160deg, #101322 0%, #1a1a2e 100%);
+        color: #fff;
+        padding: 34px 36px;
+        border-radius: 12px;
+        margin-bottom: 28px;
+        box-shadow: 0 10px 28px rgba(12,18,32,0.28);
+    }
+    .offline-hero::before {
+        content: '';
+        position: absolute; inset: 0;
+        background-image: radial-gradient(rgba(255,255,255,0.06) 1px, transparent 1px);
+        background-size: 16px 16px;
+        -webkit-mask-image: linear-gradient(160deg, rgba(0,0,0,0.9), rgba(0,0,0,0) 70%);
+        mask-image: linear-gradient(160deg, rgba(0,0,0,0.9), rgba(0,0,0,0) 70%);
+        z-index: 0;
+    }
+    .offline-hero::after {
+        content: '';
+        position: absolute; right: -34px; bottom: -34px; width: 200px; height: 200px;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%237a8bff' stroke-width='1'%3E%3Cpath d='M3 21h18M5 21V10l4-4 4 4 4-4v15'/%3E%3C/svg%3E");
+        background-repeat: no-repeat; background-size: contain;
+        opacity: 0.1; z-index: 0; pointer-events: none;
+    }
+    .offline-hero-top { position: relative; z-index: 1; display: flex; justify-content: space-between; gap: 28px; align-items: flex-start; }
     .no-data-banner { background: #fff; border: 1px solid #E5E7EB; border-radius: 8px; padding: 18px 20px; margin-bottom: 24px; display: flex; align-items: center; gap: 14px; }
     .no-data-banner .icon { width: 36px; height: 36px; flex: 0 0 auto; border-radius: 999px; background: #F3F4F6; color: #6B7280; display: flex; align-items: center; justify-content: center; font-size: 15px; }
     .no-data-banner .title { color: #111827; font-size: 14px; font-weight: 600; }
     .no-data-banner .body { color: #6B7280; font-size: 13px; margin-top: 2px; }
-    .offline-hero-title { font-size: 13px; color: rgba(255,255,255,0.72); text-transform: uppercase; font-weight: 600; }
-    .offline-hero-value { font-size: 44px; line-height: 1.1; font-weight: 300; margin-top: 8px; }
-    .offline-hero-trend { margin-top: 8px; font-size: 13px; }
-    .offline-hero-meta { text-align: right; color: rgba(255,255,255,0.78); font-size: 13px; }
+    .offline-hero-title { position: relative; padding-left: 16px; font-size: 13px; color: rgba(255,255,255,0.72); text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; }
+    .offline-hero-title::before {
+        content: ''; position: absolute; left: 0; top: 50%; transform: translateY(-50%);
+        width: 8px; height: 8px; border-radius: 999px; background: #34d399;
+        box-shadow: 0 0 0 0 rgba(52,211,153,0.55);
+        animation: hero-live-pulse 2.2s ease-out infinite;
+    }
+    @keyframes hero-live-pulse {
+        0% { box-shadow: 0 0 0 0 rgba(52,211,153,0.55); }
+        70% { box-shadow: 0 0 0 7px rgba(52,211,153,0); }
+        100% { box-shadow: 0 0 0 0 rgba(52,211,153,0); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+        .offline-hero-title::before { animation: none; }
+    }
+    .offline-hero-value { font-size: 54px; line-height: 1.05; font-weight: 300; letter-spacing: -0.02em; margin-top: 10px; font-variant-numeric: tabular-nums; }
+    .offline-hero-value::before { content: '฿'; font-size: 0.5em; font-weight: 500; color: rgba(255,255,255,0.55); margin-right: 6px; }
+    .offline-hero-trend { margin-top: 10px; font-size: 13px; }
+    .offline-hero-meta { position: relative; z-index: 1; text-align: right; color: rgba(255,255,255,0.78); font-size: 13px; padding-left: 24px; border-left: 1px solid rgba(255,255,255,0.14); }
+    .offline-hero-meta .hero-chip { display: inline-block; margin-top: 6px; padding: 4px 10px; border-radius: 999px; background: rgba(255,255,255,0.08); font-size: 11px; }
     .change.positive { color: #10B981; }
     .change.negative { color: #EF4444; }
     .section-title { display: flex; justify-content: space-between; align-items: center; margin: 6px 0 14px; }
     .section-title h2 { margin: 0; font-size: 16px; font-weight: 600; color: #111827; }
     .section-title span { font-size: 12px; color: #6B7280; }
     .metric-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin-bottom: 24px; }
+    .metric-grid .kpi-card .value { font-variant-numeric: tabular-nums; }
+    .metric-grid .kpi-card .label { padding-bottom: 10px; border-bottom: 1px solid #F3F4F6; }
+    .metric-grid .kpi-card .target-line { color: #6B7280; font-size: 12px; line-height: 1.45; margin-top: 8px; }
     /* These cards have a hover tooltip but no click action — override the shared .kpi-card
        pointer cursor (from header.php) without touching the hover-reveal tooltip mechanics. */
     .metric-grid .kpi-card { cursor: default; }
@@ -913,7 +961,7 @@ require_once __DIR__ . '/includes/header.php';
     <div class="offline-hero-top">
         <div>
             <div class="offline-hero-title"><?php echo htmlspecialchars($heroTitleDynamic); ?></div>
-            <div class="offline-hero-value"><?php echo money($mtdNetSales); ?></div>
+            <div class="offline-hero-value count-up" data-count-to="<?php echo (float) $mtdNetSales; ?>">0</div>
             <div class="offline-hero-trend"><?php echo trend_label($salesGrowth, $uiLanguage); ?></div>
         </div>
         <div class="offline-hero-meta">
@@ -961,26 +1009,27 @@ require_once __DIR__ . '/includes/header.php';
     <div class="kpi-card">
         <div class="tooltip"><?php echo htmlspecialchars(ui_text($ui, 'tooltip_orders')); ?></div>
         <div class="label"><?php echo htmlspecialchars(ui_text($ui, 'orders')); ?></div>
-        <div class="value"><?php echo number_format($mtdOrders, 0); ?></div>
+        <div class="value count-up" data-count-to="<?php echo (float) $mtdOrders; ?>">0</div>
         <?php echo trend_label($orderGrowth, $uiLanguage); ?>
     </div>
     <div class="kpi-card">
         <div class="tooltip"><?php echo htmlspecialchars(ui_text($ui, 'tooltip_units')); ?></div>
         <div class="label"><?php echo htmlspecialchars(ui_text($ui, 'units_sold')); ?></div>
-        <div class="value"><?php echo number_format($mtdUnits, 0); ?></div>
+        <div class="value count-up" data-count-to="<?php echo (float) $mtdUnits; ?>">0</div>
         <?php echo trend_label($unitGrowth, $uiLanguage); ?>
     </div>
     <div class="kpi-card">
         <div class="tooltip"><?php echo htmlspecialchars(ui_text($ui, 'tooltip_aov')); ?></div>
         <div class="label"><?php echo htmlspecialchars(ui_text($ui, 'aov')); ?></div>
-        <div class="value"><?php echo money($mtdAov); ?></div>
+        <div class="value count-up" data-count-to="<?php echo (float) $mtdAov; ?>" data-prefix="฿">0</div>
         <?php echo trend_label($aovGrowth, $uiLanguage); ?>
     </div>
     <div class="kpi-card">
         <div class="tooltip"><?php echo htmlspecialchars(ui_text($ui, 'tooltip_upt')); ?></div>
         <div class="label"><?php echo htmlspecialchars(ui_text($ui, 'upt')); ?></div>
-        <div class="value"><?php echo number_format($mtdUpt, 2); ?></div>
+        <div class="value count-up" data-count-to="<?php echo (float) $mtdUpt; ?>" data-decimals="2">0</div>
         <?php echo trend_label($uptGrowth, $uiLanguage); ?>
+        <div class="target-line"><?php echo htmlspecialchars(ui_text($ui, 'top_branch')); ?> <?php echo htmlspecialchars($topBranch['BranchName'] ?? '-'); ?> | <?php echo htmlspecialchars(ui_text($ui, 'top_product')); ?> <?php echo htmlspecialchars($topProduct['ProductName'] ?? '-'); ?></div>
     </div>
 </div>
 
@@ -1261,6 +1310,27 @@ require_once __DIR__ . '/includes/header.php';
 <script>
 const chartColors = ['#1a1a2e', '#c9a227', '#10B981', '#3B82F6', '#EF4444', '#F59E0B', '#6B7280'];
 const numberFormat = new Intl.NumberFormat('<?php echo $uiLanguage === 'th' ? 'th-TH' : 'en-US'; ?>');
+
+// Count-up animation for hero + KPI card values on page load
+document.querySelectorAll('.count-up').forEach(function (el) {
+    const target = parseFloat(el.dataset.countTo) || 0;
+    const decimals = parseInt(el.dataset.decimals, 10) || 0;
+    const prefix = el.dataset.prefix || '';
+    const suffix = el.dataset.suffix || '';
+    const duration = 1200;
+    const startTime = performance.now();
+    const fmt = new Intl.NumberFormat('th-TH', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+
+    function tick(now) {
+        const progress = Math.min((now - startTime) / duration, 1);
+        const eased = 1 - Math.pow(1 - progress, 3);
+        el.textContent = prefix + fmt.format(target * eased) + suffix;
+        if (progress < 1) {
+            requestAnimationFrame(tick);
+        }
+    }
+    requestAnimationFrame(tick);
+});
 
 window.updateDashboardData = function () {
     document.querySelector('.filter-bar').submit();

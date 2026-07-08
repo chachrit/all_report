@@ -3,21 +3,7 @@ session_start();
 
 require_once __DIR__ . '/scripts/helpers.php';
 initPerformanceSettings();
-
-$dbServer = '203.154.130.236,1433';
-$dbOptions = [
-    'Database' => 'production_jst_api',
-    'Uid' => 'sa',
-    'PWD' => 'Journal@25',
-    'CharacterSet' => 'UTF-8',
-    'Encrypt' => false,
-    'TrustServerCertificate' => true,
-];
-
-$conn = sqlsrv_connect($dbServer, $dbOptions);
-if (!$conn) {
-    die('Connection failed: ' . print_r(sqlsrv_errors(), true));
-}
+require_once __DIR__ . '/database.php';
 
 function fetch_one($conn, string $sql, array $params = []): array
 {
@@ -145,35 +131,11 @@ function append_filter(array &$conditions, array &$params, string $condition, $v
     }
 }
 
-function repeated_params(array $base, array $filters, int $filterRepeats = 1): array
-{
-    $params = $base;
-    for ($i = 0; $i < $filterRepeats; $i++) {
-        foreach ($filters as $filterParam) {
-            $params[] = $filterParam;
-        }
-    }
-    return $params;
-}
-
-function params_for_periods(array $periodPairs, array $filters): array
-{
-    $params = [];
-    foreach ($periodPairs as $pair) {
-        $params[] = $pair[0];
-        $params[] = $pair[1];
-        foreach ($filters as $filterParam) {
-            $params[] = $filterParam;
-        }
-    }
-    return $params;
-}
-
 $dateInfo = fetch_one($conn, "
     SELECT
-        CAST(MAX(paymentDate) AS date) AS maxDate,
-        DATEFROMPARTS(YEAR(MAX(paymentDate)), MONTH(MAX(paymentDate)), 1) AS mtdStart
-    FROM dbo.OrderSummary
+        CAST(MAX(order_datetime) AS date) AS maxDate,
+        DATEFROMPARTS(YEAR(MAX(order_datetime)), MONTH(MAX(order_datetime)), 1) AS mtdStart
+    FROM fact_online_orders
 ");
 
 $maxDate = $dateInfo['maxDate'];
@@ -182,7 +144,7 @@ $uiLanguage = request_value('lang', 'th', ['th', 'en']);
 $translations = [
     'th' => [
         'page_title' => 'แดชบอร์ดยอดขายออนไลน์',
-        'page_subtitle' => 'ติดตามผลการขายจากข้อมูลจริง production_jst_api',
+        'page_subtitle' => 'ติดตามผลการขายจากข้อมูลจริง all_report (fact_online_orders)',
         'all_platforms' => 'ทุกแพลตฟอร์ม',
         'today' => 'วันนี้',
         'mtd' => 'เดือนนี้',
@@ -204,13 +166,15 @@ $translations = [
         'high_discount' => 'ส่วนลดสูง',
         'all_sales' => 'ทุกประเภทการขาย',
         'normal' => 'ปกติ',
-        'combined' => 'จัดชุด',
         'gift' => 'ของแถม',
         'language' => 'ภาษา',
         'thai' => 'ไทย',
         'english' => 'อังกฤษ',
         'hero_title' => 'ยอดขายสุทธิออนไลน์เดือนนี้',
-        'source_ordersummary' => 'แหล่งข้อมูล: OrderSummary',
+        'hero_title_today' => 'ยอดขายสุทธิออนไลน์วันนี้',
+        'hero_title_mtd' => 'ยอดขายสุทธิออนไลน์เดือนนี้',
+        'hero_title_ytd' => 'ยอดขายสุทธิออนไลน์ปีนี้',
+        'source_ordersummary' => 'แหล่งข้อมูล: fact_online_orders',
         'discount' => 'ส่วนลด',
         'orders' => 'ออเดอร์',
         'units_sold' => 'จำนวนชิ้นที่ขาย',
@@ -223,16 +187,18 @@ $translations = [
         'manager_review' => 'สำหรับผู้จัดการช่องทางและสินค้า',
         'daily_sales_chart' => 'ยอดขายสุทธิรายวัน',
         'platform_share' => 'สัดส่วนยอดขายตามแพลตฟอร์ม',
-        'payment_mix' => 'สัดส่วนวิธีชำระเงิน',
         'product_mix' => 'สัดส่วนสินค้า',
         'order_status' => 'สถานะออเดอร์',
+        'peak_hours_chart' => 'ยอดออเดอร์ตามช่วงเวลา',
+        'tooltip_peak_hours' => 'จำนวนออเดอร์แยกตามชั่วโมง ย้อนหลัง 90 วัน (ไม่ขึ้นกับตัวกรองช่วงเวลาด้านบน) ใช้วางแผนโปรโมชั่น/กำลังคนซัพพอร์ตช่วงเวลาที่คนสั่งเยอะ',
+        'weekday_orders_chart' => 'ยอดออเดอร์ตามวันในสัปดาห์',
+        'tooltip_weekday_orders' => 'จำนวนออเดอร์แยกตามวันในสัปดาห์ ย้อนหลัง 90 วัน (ไม่ขึ้นกับตัวกรองช่วงเวลาด้านบน)',
         'platform_performance' => 'ผลการดำเนินงานตามแพลตฟอร์ม',
         'product' => 'สินค้า',
         'net_sales' => 'ยอดขายสุทธิ',
         'units' => 'ชิ้น',
-        'disc_pct' => 'ส่วนลด %',
         'top_products' => 'สินค้าขายดี',
-        'gift_excluded' => 'ไม่รวมรายการของแถม เรียงตามยอดขายสุทธิเดือนนี้',
+        'gift_excluded' => 'ไม่รวมรายการของแถม เรียงตามยอดขายสุทธิ%s',
         'daily_control' => 'ควบคุมงานรายวัน',
         'operator_followup' => 'สำหรับทีมปฏิบัติการติดตามต่อ',
         'today_sales' => 'ยอดขายวันนี้',
@@ -240,18 +206,6 @@ $translations = [
         'cancelled' => 'ยกเลิก',
         'return' => 'คืนสินค้า',
         'pending' => 'รอดำเนินการ',
-        'low_cover_skus' => 'SKU สต็อกต่ำ',
-        'under_14_days' => 'SKU ขายดีที่มีสต็อกครอบคลุมต่ำกว่า 14 วัน',
-        'stock_coverage' => 'ความครอบคลุมสต็อกของ SKU ขายดี',
-        'sales' => 'ยอดขาย',
-        'stock' => 'สต็อก',
-        'cover' => 'ครอบคลุม',
-        'days' => 'วัน',
-        'after_sales_queue' => 'คิวงานหลังการขาย',
-        'status' => 'สถานะ',
-        'type' => 'ประเภท',
-        'cases' => 'เคส',
-        'refund' => 'ยอดคืนเงิน',
         'chart_net_sales' => 'ยอดขายสุทธิ',
         'baseline_yoy' => 'เทียบช่วงเดียวกันปีก่อน',
         'baseline_mom' => 'เทียบช่วงเดียวกันเดือนก่อน',
@@ -260,7 +214,6 @@ $translations = [
         'excluded_note' => 'ไม่รวมยกเลิก/คืนสินค้า',
         'excluded_orders' => 'ออเดอร์',
         'lost_revenue' => 'ยอดสูญเสียจากยกเลิก/คืน',
-        'out_of_stock' => 'สินค้าหมด',
         'cancel_watch_title' => 'เฝ้าระวังอัตรายกเลิก',
         'cancel_watch_subtitle' => 'อัตรายกเลิกล่าสุดเทียบค่าเฉลี่ย 30 วัน แยกตามแพลตฟอร์ม',
         'cancel_watch_ok' => 'ไม่มีแพลตฟอร์มที่อัตรายกเลิกผิดปกติ',
@@ -282,6 +235,8 @@ $translations = [
         'disc_norm_col' => 'ส่วนลดปกติ',
         'disc_diff_col' => 'ส่วนต่าง',
         'gross_col' => 'ยอดขายก่อนหักส่วนลด',
+        'discount_tier_trend' => 'แนวโน้มกลุ่มส่วนลดรายวัน',
+        'tooltip_discount_tier_trend' => 'สัดส่วนยอดขายสุทธิแยกตามกลุ่มส่วนลด (ไม่มีส่วนลด / มีส่วนลด / ส่วนลดสูง) ในแต่ละวัน — กราฟนี้แสดงทุกกลุ่มเสมอ ไม่ขึ้นกับตัวกรองแคมเปญด้านบน',
         'projection_label' => 'คาดการณ์สิ้นเดือน',
         'projection_note' => 'คำนวณจากยอดจริง + ค่าเฉลี่ยตามวันในสัปดาห์',
         'vs_prev_month' => 'เทียบเดือนก่อน',
@@ -293,11 +248,10 @@ $translations = [
         'tooltip_vs_prev_month' => 'ยอดคาดการณ์สิ้นเดือนนี้ เทียบกับยอดขายจริงทั้งเดือนของเดือนก่อนหน้า',
         'tooltip_vs_same_month_ly' => 'ยอดคาดการณ์สิ้นเดือนนี้ เทียบกับยอดขายจริงของเดือนเดียวกันปีที่แล้ว แสดงเฉพาะเมื่อมีข้อมูลปีก่อนที่เชื่อถือได้ (เริ่ม ธ.ค. 2025)',
         'tooltip_lost_revenue' => 'ยอดขายที่หายไปจากออเดอร์ที่ถูกยกเลิกหรือคืนสินค้า ในช่วงเวลาที่เลือก',
-        'tooltip_cover' => 'จำนวนวันที่สต็อกปัจจุบันจะขายหมด คำนวณจากอัตราขายเฉลี่ยต่อวัน ถ้าสต็อกเหลือ 0 จะขึ้น "สินค้าหมด"',
     ],
     'en' => [
         'page_title' => 'Online Sales Dashboard',
-        'page_subtitle' => 'Sales performance from production_jst_api',
+        'page_subtitle' => 'Sales performance from all_report (fact_online_orders)',
         'all_platforms' => 'All Platforms',
         'today' => 'Today',
         'mtd' => 'MTD',
@@ -319,13 +273,15 @@ $translations = [
         'high_discount' => 'High Discount',
         'all_sales' => 'All Sales',
         'normal' => 'Normal',
-        'combined' => 'Combined',
         'gift' => 'Gift',
         'language' => 'Language',
         'thai' => 'Thai',
         'english' => 'English',
         'hero_title' => 'MTD Online Net Sales',
-        'source_ordersummary' => 'Source: OrderSummary',
+        'hero_title_today' => 'Today Online Net Sales',
+        'hero_title_mtd' => 'MTD Online Net Sales',
+        'hero_title_ytd' => 'YTD Online Net Sales',
+        'source_ordersummary' => 'Source: fact_online_orders',
         'discount' => 'Discount',
         'orders' => 'Orders',
         'units_sold' => 'Units Sold',
@@ -338,16 +294,18 @@ $translations = [
         'manager_review' => 'For channel and merchandising managers',
         'daily_sales_chart' => 'Daily Net Sales',
         'platform_share' => 'Platform Sales Share',
-        'payment_mix' => 'Payment Mix',
         'product_mix' => 'Product Mix',
         'order_status' => 'Order Status',
+        'peak_hours_chart' => 'Orders by Hour of Day',
+        'tooltip_peak_hours' => 'Order count by hour, trailing 90 days (independent of the date-range filter above). Use for promo timing / support staffing around peak hours.',
+        'weekday_orders_chart' => 'Orders by Day of Week',
+        'tooltip_weekday_orders' => 'Order count by weekday, trailing 90 days (independent of the date-range filter above).',
         'platform_performance' => 'Platform Performance',
         'product' => 'Product',
         'net_sales' => 'Net Sales',
         'units' => 'Units',
-        'disc_pct' => 'Disc %',
         'top_products' => 'Top Products',
-        'gift_excluded' => 'Gift lines excluded. Ranked by MTD net sales.',
+        'gift_excluded' => 'Gift lines excluded. Ranked by %s net sales.',
         'daily_control' => 'Daily Control',
         'operator_followup' => 'For operator follow-up',
         'today_sales' => 'Today Sales',
@@ -355,18 +313,6 @@ $translations = [
         'cancelled' => 'Cancelled',
         'return' => 'Return',
         'pending' => 'Pending',
-        'low_cover_skus' => 'Low Cover SKUs',
-        'under_14_days' => 'Top SKUs under 14 days cover',
-        'stock_coverage' => 'Top SKU Stock Coverage',
-        'sales' => 'Sales',
-        'stock' => 'Stock',
-        'cover' => 'Cover',
-        'days' => 'days',
-        'after_sales_queue' => 'After-Sales Queue',
-        'status' => 'Status',
-        'type' => 'Type',
-        'cases' => 'Cases',
-        'refund' => 'Refund',
         'chart_net_sales' => 'Net Sales',
         'baseline_yoy' => 'vs same period last year',
         'baseline_mom' => 'vs same period last month',
@@ -375,7 +321,6 @@ $translations = [
         'excluded_note' => 'Excl. cancelled/returns',
         'excluded_orders' => 'orders',
         'lost_revenue' => 'Lost revenue (cancel/return)',
-        'out_of_stock' => 'Out of stock',
         'cancel_watch_title' => 'Cancel-Rate Watch',
         'cancel_watch_subtitle' => 'Latest-day cancel rate vs 30-day norm, by platform',
         'cancel_watch_ok' => 'No platform showing an unusual cancel rate',
@@ -397,6 +342,8 @@ $translations = [
         'disc_norm_col' => 'Normal Disc %',
         'disc_diff_col' => 'Diff',
         'gross_col' => 'Gross Sales',
+        'discount_tier_trend' => 'Discount-Tier Trend',
+        'tooltip_discount_tier_trend' => 'Daily net sales split by discount tier (no discount / discounted / high discount) — always shows all tiers, independent of the Campaign filter above.',
         'projection_label' => 'Month-End Projection',
         'projection_note' => 'Actual so far + weekday-weighted average',
         'vs_prev_month' => 'vs Prev Month',
@@ -408,20 +355,19 @@ $translations = [
         'tooltip_vs_prev_month' => 'This month\'s projected total compared with last month\'s actual full-month sales.',
         'tooltip_vs_same_month_ly' => 'This month\'s projected total compared with the same month last year. Only shown once reliable prior-year data exists (from Dec 2025).',
         'tooltip_lost_revenue' => 'Sales value lost from orders that were cancelled or returned in the selected period.',
-        'tooltip_cover' => 'Days the current stock will last at the average daily sell rate. Shows "Out of stock" when stock is 0.',
     ],
 ];
 $ui = $translations[$uiLanguage];
 $shopRows = fetch_all($conn, "
-    SELECT shopName
-    FROM dbo.OrderSummary
-    WHERE NULLIF(shopName, '') IS NOT NULL
-    GROUP BY shopName
-    ORDER BY shopName;
+    SELECT platform
+    FROM fact_online_orders
+    WHERE NULLIF(platform, '') IS NOT NULL
+    GROUP BY platform
+    ORDER BY platform;
 ");
 $shopOptions = ['all' => ui_text($ui, 'all_platforms')];
 foreach ($shopRows as $shopRow) {
-    $shopOptions[(string) $shopRow['shopName']] = (string) $shopRow['shopName'];
+    $shopOptions[(string) $shopRow['platform']] = (string) $shopRow['platform'];
 }
 
 $filterValues = [
@@ -431,7 +377,7 @@ $filterValues = [
     'branch' => request_value('branch', 'all', array_keys($shopOptions)),
     'category' => request_value('category', 'all', ['all', 'body_oil_sunscreen', 'body_oil', 'parfum', 'body_mist', 'lip_oil', 'hand_cream', 'other']),
     'campaign' => request_value('campaign', 'all', ['all', 'discounted', 'no_discount', 'high_discount']),
-    'sales_type' => request_value('sales_type', 'all', ['all', 'Normal', 'Combined', 'Gift']),
+    'sales_type' => request_value('sales_type', 'all', ['all', 'Normal', 'Gift']),
 ];
 $filterOptions = [
     'date_range' => ['today' => ui_text($ui, 'today'), 'mtd' => ui_text($ui, 'mtd'), 'ytd' => ui_text($ui, 'ytd')],
@@ -457,7 +403,6 @@ $filterOptions = [
     'sales_type' => [
         'all' => ui_text($ui, 'all_sales'),
         'Normal' => ui_text($ui, 'normal'),
-        'Combined' => ui_text($ui, 'combined'),
         'Gift' => ui_text($ui, 'gift'),
     ],
 ];
@@ -482,9 +427,10 @@ if ($filterValues['date_range'] === 'today') {
  * period prorated by elapsed-day fraction (that produced wrong-sign badges; sales
  * cluster by weekday within a month).
  *
- * WHICH shift is chosen depends on data availability: OrderSummary only has real
- * volume from Dec 2025 (Jul 2025 holds ฿370K of partial-import rows vs ~฿40M/month
- * real — a YoY badge against that reads +10,000% and is pure noise). So YoY is used
+ * WHICH shift is chosen depends on data availability: fact_online_orders only has
+ * real volume from Dec 2025 (confirmed on the all_report ETL too — Apr-Nov 2025 is a
+ * ramp-up period peaking around ฿0.6-2.6M/month vs ~฿20-29M/month from Dec 2025 on —
+ * a YoY badge against the ramp-up period would be pure noise). So YoY is used
  * only when the shifted window lands entirely in reliable data; otherwise fall back
  * to same-day-last-week (today) or same-span-last-month (MTD), and for YTD — which
  * has no honest short-shift equivalent — show a neutral "no baseline yet" badge.
@@ -510,75 +456,115 @@ if ($yoyStart >= RELIABLE_DATA_FROM) {
     $targetEnd = (new DateTime($periodEnd))->modify('-1 year')->format('Y-m-d');
 }
 
-$dayOfMonth = max(1, (int) ((new DateTime($periodStart))->diff(new DateTime($periodEnd))->days));
 $periodLabel = (new DateTime($periodStart))->format('M j') . ' - ' . (new DateTime($periodEnd))->modify('-1 day')->format('M j, Y');
-$productGroupSql = product_group_case('productName');
-$filterConditions = [];
-$filterParams = [];
-if ($filterValues['branch'] !== 'all') {
-    append_filter($filterConditions, $filterParams, 'shopName = ?', $filterValues['branch']);
-}
-if ($filterValues['category'] !== 'all') {
-    append_filter($filterConditions, $filterParams, product_group_case('productName') . ' = ?', $filterValues['category']);
-}
-if ($filterValues['campaign'] === 'discounted') {
-    append_filter($filterConditions, $filterParams, '(disShop + disVC) > 0');
-} elseif ($filterValues['campaign'] === 'no_discount') {
-    append_filter($filterConditions, $filterParams, '(disShop + disVC) = 0');
-} elseif ($filterValues['campaign'] === 'high_discount') {
-    append_filter($filterConditions, $filterParams, 'priceBeforeDisc > 0 AND ((disShop + disVC) * 100.0 / priceBeforeDisc) >= 20');
-}
-if ($filterValues['sales_type'] !== 'all') {
-    append_filter($filterConditions, $filterParams, 'itemType = ?', $filterValues['sales_type']);
-} else {
-    // Default view claims "Gift lines excluded" (see the Top Products table note) but
-    // previously didn't actually filter them out. Gift rows always carry netSale = 0, so
-    // revenue/AOV/orders were never affected, but qty was — free/sample (NFS) giveaways
-    // were counted as "units sold" (~10% inflation in spot checks) and fed into the stock
-    // coverage day-count, understating real days of cover. Excluding by default here
-    // matches the same intent as SELLABLE_PRODUCT_SQL on the offline dashboard. Picking
-    // "Gift" explicitly from the Sales Type dropdown still works and overrides this.
-    append_filter($filterConditions, $filterParams, "itemType <> 'Gift'");
-}
-$filterSql = $filterConditions ? ' AND ' . implode(' AND ', $filterConditions) : '';
+$productGroupSql = product_group_case('i.product_name');
 
 /**
- * Cancelled/Return rows carry full netSale values (live check on a 30-day window:
- * ฿5.5M cancelled + ฿0.5M returned ≈ 15% of the raw total), so counting them
- * overstates every revenue/volume KPI. Applied to revenue queries only — the Order
- * Status chart and the Exception Orders card must keep seeing all statuses, that is
- * their whole job. The offline dashboard never had this problem (POS posts only
- * completed sales), so excluding here brings the two channels onto the same meaning
- * of "net sales".
+ * fact_online_orders (order header) and fact_online_order_items (line items) replace
+ * the old flat OrderSummary, which had order fields denormalized onto every line —
+ * so every query below now needs both tables. Filters split by which table actually
+ * carries that column: platform/date/status/campaign live on the order header;
+ * category and the gift/sales-type split are line-item attributes.
  */
-$validSalesSql = " AND orderStatus NOT IN ('Cancelled', 'Return')";
+$headerConditions = [];
+$headerParams = [];
+$itemConditions = [];
+$itemParams = [];
+if ($filterValues['branch'] !== 'all') {
+    append_filter($headerConditions, $headerParams, 'o.platform = ?', $filterValues['branch']);
+}
+if ($filterValues['category'] !== 'all') {
+    append_filter($itemConditions, $itemParams, product_group_case('i.product_name') . ' = ?', $filterValues['category']);
+}
+// Snapshot before the campaign condition below — the tier-trend chart needs to show
+// all three discount tiers regardless of which one the Campaign filter has selected.
+$headerConditionsNoCampaign = $headerConditions;
+$headerParamsNoCampaign = $headerParams;
+/**
+ * Campaign (discount-tier) filter must live at the ORDER header level: the item-level
+ * discount_per_item column is populated as 0 on every row in this ETL (verified — not
+ * a filter-mismatch, the data simply isn't there), so per-line discount % can't be
+ * computed. o.discount_amount/o.subtotal are the only reliable discount figures this
+ * ETL provides, at order grain.
+ */
+if ($filterValues['campaign'] === 'discounted') {
+    append_filter($headerConditions, $headerParams, 'o.discount_amount > 0');
+} elseif ($filterValues['campaign'] === 'no_discount') {
+    append_filter($headerConditions, $headerParams, 'o.discount_amount = 0');
+} elseif ($filterValues['campaign'] === 'high_discount') {
+    append_filter($headerConditions, $headerParams, 'o.subtotal > 0 AND (o.discount_amount * 100.0 / o.subtotal) >= 20');
+}
+/**
+ * There is no itemType column anywhere in this ETL (verified against the full schema),
+ * so the old Normal/Combined/Gift split can't be reproduced directly. unit_price = 0 is
+ * used as the Gift proxy instead — it lines up with the old system's own definition
+ * (gift/sample lines always carried netSale = 0), just derived differently. "Combined"
+ * has no equivalent signal at all and has been dropped from the filter. Default
+ * behavior (excluding free lines from unit counts, to avoid giveaway-line qty
+ * inflation) is preserved.
+ */
+if ($filterValues['sales_type'] === 'Gift') {
+    append_filter($itemConditions, $itemParams, 'i.unit_price = 0');
+} else {
+    append_filter($itemConditions, $itemParams, 'i.unit_price <> 0');
+}
+$headerSql = $headerConditions ? ' AND ' . implode(' AND ', $headerConditions) : '';
+$itemSql = $itemConditions ? ' AND ' . implode(' AND ', $itemConditions) : '';
+$headerSqlNoCampaign = $headerConditionsNoCampaign ? ' AND ' . implode(' AND ', $headerConditionsNoCampaign) : '';
+
+/**
+ * Cancelled rows carry full revenue values, so counting them overstates every revenue/
+ * volume KPI (same rationale as before). Applied to revenue queries only — the Order
+ * Status chart and the Exception Orders card must keep seeing all statuses, that is
+ * their whole job. 'Return' is kept in the exclusion list for forward-compatibility
+ * even though this data currently has no 'Return' status (confirmed: Delivered,
+ * Cancelled, WaitConfirm, Delivering, WaitPay, WaitOuterDeliver, Question).
+ */
+$validSalesSql = " AND o.order_status NOT IN ('Cancelled', 'Return')";
+
+/**
+ * Pre-aggregates each order's item lines (units + revenue) once, filtered by category/
+ * gift-line conditions. Joining this (instead of the raw item table) into every
+ * order-grain query below avoids fan-out — an order with N item lines would otherwise
+ * have its header fields (discount_amount, order_status, etc.) counted N times.
+ * SUM(i.line_total) was verified against a sample of orders to exactly equal
+ * o.total_amount, so it's a reliable revenue figure even though it doesn't reconcile
+ * with o.subtotal (subtotal/unit_price appear to reflect pre-livestream catalog
+ * pricing, not the actual transaction amount — see SYSTEM_MAP.md Known Data Risks).
+ */
+$itemAggCte = "item_agg AS (
+        SELECT i.order_key, SUM(i.quantity) AS units, SUM(i.line_total) AS netSales
+        FROM fact_online_order_items i
+        WHERE 1=1 {$itemSql}
+        GROUP BY i.order_key
+    )";
 
 $summaryRows = fetch_all($conn, "
+    WITH {$itemAggCte}
     SELECT
         'mtd' AS period,
-        COUNT(DISTINCT orderId) AS orders,
-        SUM(CAST(qty AS decimal(18,2))) AS units,
-        SUM(netSale) AS netSales,
-        SUM(priceBeforeDisc) AS grossSales,
-        SUM(disShop + disVC) AS discount
-    FROM dbo.OrderSummary
-    WHERE paymentDate >= ? AND paymentDate < ? {$filterSql}{$validSalesSql}
+        COUNT(DISTINCT o.order_key) AS orders,
+        SUM(ia.units) AS units,
+        SUM(ia.netSales) AS netSales,
+        SUM(o.subtotal) AS grossSales,
+        SUM(o.discount_amount) AS discount
+    FROM fact_online_orders o
+    JOIN item_agg ia ON ia.order_key = o.order_key
+    WHERE o.order_datetime >= ? AND o.order_datetime < ? {$headerSql}{$validSalesSql}
 
     UNION ALL
 
     SELECT
         'prev_mtd' AS period,
-        COUNT(DISTINCT orderId) AS orders,
-        SUM(CAST(qty AS decimal(18,2))) AS units,
-        SUM(netSale) AS netSales,
-        SUM(priceBeforeDisc) AS grossSales,
-        SUM(disShop + disVC) AS discount
-    FROM dbo.OrderSummary
-    WHERE paymentDate >= ? AND paymentDate < ? {$filterSql}{$validSalesSql};
-", params_for_periods([
-    [$periodStart, $periodEnd],
-    [$targetStart, $targetEnd],
-], $filterParams));
+        COUNT(DISTINCT o.order_key) AS orders,
+        SUM(ia.units) AS units,
+        SUM(ia.netSales) AS netSales,
+        SUM(o.subtotal) AS grossSales,
+        SUM(o.discount_amount) AS discount
+    FROM fact_online_orders o
+    JOIN item_agg ia ON ia.order_key = o.order_key
+    WHERE o.order_datetime >= ? AND o.order_datetime < ? {$headerSql}{$validSalesSql};
+", array_merge($itemParams, [$periodStart, $periodEnd], $headerParams, [$targetStart, $targetEnd], $headerParams));
 
 $summary = ['mtd' => [], 'prev_mtd' => []];
 foreach ($summaryRows as $row) {
@@ -604,17 +590,19 @@ $prevAov = $targetBaseOrders > 0 ? $targetBaseNetSales / $targetBaseOrders : 0;
 $mtdUpt = $mtdOrders > 0 ? $mtdUnits / $mtdOrders : 0;
 
 $dailyTrend = fetch_all($conn, "
+    WITH {$itemAggCte}
     SELECT
-        CONVERT(varchar(10), CAST(paymentDate AS date), 120) AS saleDate,
-        COUNT(DISTINCT orderId) AS orders,
-        SUM(qty) AS units,
-        SUM(netSale) AS netSales,
-        SUM(disShop + disVC) AS discount
-    FROM dbo.OrderSummary
-    WHERE paymentDate >= ? AND paymentDate < ? {$filterSql}{$validSalesSql}
-    GROUP BY CAST(paymentDate AS date)
-    ORDER BY CAST(paymentDate AS date);
-", repeated_params([$periodStart, $periodEnd], $filterParams));
+        CONVERT(varchar(10), CAST(o.order_datetime AS date), 120) AS saleDate,
+        COUNT(DISTINCT o.order_key) AS orders,
+        SUM(ia.units) AS units,
+        SUM(ia.netSales) AS netSales,
+        SUM(o.discount_amount) AS discount
+    FROM fact_online_orders o
+    JOIN item_agg ia ON ia.order_key = o.order_key
+    WHERE o.order_datetime >= ? AND o.order_datetime < ? {$headerSql}{$validSalesSql}
+    GROUP BY CAST(o.order_datetime AS date)
+    ORDER BY CAST(o.order_datetime AS date);
+", array_merge($itemParams, [$periodStart, $periodEnd], $headerParams));
 
 $todaySales = 0.0;
 if (!empty($dailyTrend)) {
@@ -622,161 +610,117 @@ if (!empty($dailyTrend)) {
     $todaySales = n($lastDailyRow['netSales'] ?? 0);
 }
 
-$platforms = fetch_all($conn, "
+/**
+ * Discount-tier bucketing repeats the same CASE the campaign filter uses (:482-487)
+ * so the two stay in sync. Uses $headerSqlNoCampaign — this chart's whole point is
+ * to show all three tiers regardless of which one the Campaign filter has selected.
+ */
+$discountTierCase = "CASE
+        WHEN o.subtotal > 0 AND (o.discount_amount * 100.0 / o.subtotal) >= 20 THEN 'high_discount'
+        WHEN o.discount_amount > 0 THEN 'discounted'
+        ELSE 'no_discount'
+    END";
+$discountTierRows = fetch_all($conn, "
+    WITH {$itemAggCte}
     SELECT
-        shopName,
-        COUNT(DISTINCT orderId) AS orders,
-        SUM(qty) AS units,
-        SUM(netSale) AS netSales,
-        SUM(priceBeforeDisc) AS grossSales,
-        SUM(disShop + disVC) AS discount
-    FROM dbo.OrderSummary
-    WHERE paymentDate >= ? AND paymentDate < ? {$filterSql}{$validSalesSql}
-    GROUP BY shopName
-    ORDER BY netSales DESC;
-", repeated_params([$periodStart, $periodEnd], $filterParams));
+        CONVERT(varchar(10), CAST(o.order_datetime AS date), 120) AS saleDate,
+        {$discountTierCase} AS bucket,
+        COUNT(DISTINCT o.order_key) AS orders,
+        SUM(ia.netSales) AS netSales
+    FROM fact_online_orders o
+    JOIN item_agg ia ON ia.order_key = o.order_key
+    WHERE o.order_datetime >= ? AND o.order_datetime < ? {$headerSqlNoCampaign}{$validSalesSql}
+    GROUP BY CAST(o.order_datetime AS date), {$discountTierCase}
+    ORDER BY CAST(o.order_datetime AS date);
+", array_merge($itemParams, [$periodStart, $periodEnd], $headerParamsNoCampaign));
 
-$payments = fetch_all($conn, "
-    SELECT TOP 10
-        CASE
-            WHEN paymentMethod LIKE '%COD%' THEN 'COD'
-            WHEN paymentMethod LIKE '%PayLater%' OR paymentMethod LIKE '%PAY_LATER%' OR paymentMethod LIKE '%SPayLater%' THEN 'Pay Later'
-            WHEN paymentMethod LIKE '%Credit%' OR paymentMethod LIKE '%card%' OR paymentMethod LIKE '%CARD%' OR paymentMethod LIKE '%2C2P%' THEN 'Card'
-            WHEN paymentMethod LIKE '%PromptPay%' OR paymentMethod LIKE '%PROMPTPAY%' THEN 'PromptPay'
-            WHEN paymentMethod LIKE '%Banking%' OR paymentMethod LIKE '%Mbanking%' THEN 'Mobile Banking'
-            WHEN paymentMethod LIKE '%ShopeePay%' OR paymentMethod LIKE '%TrueMoney%' OR paymentMethod LIKE '%Balance%' THEN 'Wallet'
-            ELSE COALESCE(NULLIF(paymentMethod, ''), 'Unknown')
-        END AS paymentGroup,
-        COUNT(DISTINCT orderId) AS orders,
-        SUM(netSale) AS netSales
-    FROM dbo.OrderSummary
-    WHERE paymentDate >= ? AND paymentDate < ? {$filterSql}{$validSalesSql}
-    GROUP BY CASE
-            WHEN paymentMethod LIKE '%COD%' THEN 'COD'
-            WHEN paymentMethod LIKE '%PayLater%' OR paymentMethod LIKE '%PAY_LATER%' OR paymentMethod LIKE '%SPayLater%' THEN 'Pay Later'
-            WHEN paymentMethod LIKE '%Credit%' OR paymentMethod LIKE '%card%' OR paymentMethod LIKE '%CARD%' OR paymentMethod LIKE '%2C2P%' THEN 'Card'
-            WHEN paymentMethod LIKE '%PromptPay%' OR paymentMethod LIKE '%PROMPTPAY%' THEN 'PromptPay'
-            WHEN paymentMethod LIKE '%Banking%' OR paymentMethod LIKE '%Mbanking%' THEN 'Mobile Banking'
-            WHEN paymentMethod LIKE '%ShopeePay%' OR paymentMethod LIKE '%TrueMoney%' OR paymentMethod LIKE '%Balance%' THEN 'Wallet'
-            ELSE COALESCE(NULLIF(paymentMethod, ''), 'Unknown')
-        END
+$discountTierBuckets = ['no_discount', 'discounted', 'high_discount'];
+$discountTierTrend = [];
+foreach ($discountTierBuckets as $bucket) {
+    $discountTierTrend[$bucket] = array_fill_keys(array_column($dailyTrend, 'saleDate'), 0.0);
+}
+foreach ($discountTierRows as $row) {
+    $discountTierTrend[$row['bucket']][$row['saleDate']] = n($row['netSales'] ?? 0);
+}
+
+$platforms = fetch_all($conn, "
+    WITH {$itemAggCte}
+    SELECT
+        o.platform AS shopName,
+        COUNT(DISTINCT o.order_key) AS orders,
+        SUM(ia.units) AS units,
+        SUM(ia.netSales) AS netSales,
+        SUM(o.subtotal) AS grossSales,
+        SUM(o.discount_amount) AS discount
+    FROM fact_online_orders o
+    JOIN item_agg ia ON ia.order_key = o.order_key
+    WHERE o.order_datetime >= ? AND o.order_datetime < ? {$headerSql}{$validSalesSql}
+    GROUP BY o.platform
     ORDER BY netSales DESC;
-", repeated_params([$periodStart, $periodEnd], $filterParams));
+", array_merge($itemParams, [$periodStart, $periodEnd], $headerParams));
 
 $productMix = fetch_all($conn, "
     SELECT
         {$productGroupSql} AS productGroup,
-        SUM(qty) AS units,
-        SUM(netSale) AS netSales,
-        SUM(disShop + disVC) AS discount
-    FROM dbo.OrderSummary
-    WHERE paymentDate >= ? AND paymentDate < ? {$filterSql}{$validSalesSql}
+        SUM(i.quantity) AS units,
+        SUM(i.line_total) AS netSales
+    FROM fact_online_orders o
+    JOIN fact_online_order_items i ON i.order_key = o.order_key
+    WHERE o.order_datetime >= ? AND o.order_datetime < ? {$headerSql}{$itemSql}{$validSalesSql}
     GROUP BY {$productGroupSql}
     ORDER BY netSales DESC;
-", repeated_params([$periodStart, $periodEnd], $filterParams));
+", array_merge([$periodStart, $periodEnd], $headerParams, $itemParams));
 
+/**
+ * Per-product discount % (old "Disc %" column) can't be reproduced: discount_per_item
+ * is 0 on every row in this ETL. sku is best-effort — DimOnlineProduct.sku_code is
+ * ~92% filled (joined via product_key), falling back to the item row's own sku_code
+ * (~38% filled) — both can be blank for the same product.
+ */
 $topProducts = fetch_all($conn, "
     WITH product_sales AS (
         SELECT TOP 15
-            sku,
-            productName,
-            SUM(qty) AS units,
-            SUM(netSale) AS netSales,
-            SUM(disShop + disVC) AS discount,
-            CASE WHEN SUM(priceBeforeDisc) > 0 THEN SUM(disShop + disVC) * 100.0 / SUM(priceBeforeDisc) ELSE 0 END AS discountRate
-        FROM dbo.OrderSummary
-        WHERE paymentDate >= ? AND paymentDate < ? {$filterSql}{$validSalesSql}
-        GROUP BY sku, productName
+            i.product_key,
+            i.product_name AS productName,
+            MAX(NULLIF(i.sku_code, '')) AS itemSku,
+            SUM(i.quantity) AS units,
+            SUM(i.line_total) AS netSales
+        FROM fact_online_orders o
+        JOIN fact_online_order_items i ON i.order_key = o.order_key
+        WHERE o.order_datetime >= ? AND o.order_datetime < ? {$headerSql}{$itemSql}{$validSalesSql}
+        GROUP BY i.product_key, i.product_name
         ORDER BY netSales DESC
-    ),
-    sku_picture AS (
-        SELECT
-            skuId,
-            MAX(NULLIF(picture, '')) AS picture
-        FROM dbo.GetItemSkus
-        WHERE NULLIF(picture, '') IS NOT NULL
-        GROUP BY skuId
     )
     SELECT
-        p.sku,
-        p.productName,
-        p.units,
-        p.netSales,
-        p.discount,
-        p.discountRate,
-        s.picture
-    FROM product_sales p
-    LEFT JOIN sku_picture s ON p.sku = s.skuId
-    ORDER BY p.netSales DESC;
-", repeated_params([$periodStart, $periodEnd], $filterParams));
+        COALESCE(NULLIF(p.sku_code, ''), ps.itemSku) AS sku,
+        ps.productName,
+        ps.units,
+        ps.netSales
+    FROM product_sales ps
+    LEFT JOIN DimOnlineProduct p ON p.product_key = ps.product_key
+    ORDER BY ps.netSales DESC;
+", array_merge([$periodStart, $periodEnd], $headerParams, $itemParams));
 
 $statusRows = fetch_all($conn, "
+    WITH {$itemAggCte}
     SELECT
-        orderStatus,
-        COUNT(DISTINCT orderId) AS orders,
-        SUM(netSale) AS netSales
-    FROM dbo.OrderSummary
-    WHERE paymentDate >= ? AND paymentDate < ? {$filterSql}
-    GROUP BY orderStatus
+        o.order_status AS orderStatus,
+        COUNT(DISTINCT o.order_key) AS orders,
+        SUM(ia.netSales) AS netSales
+    FROM fact_online_orders o
+    JOIN item_agg ia ON ia.order_key = o.order_key
+    WHERE o.order_datetime >= ? AND o.order_datetime < ? {$headerSql}
+    GROUP BY o.order_status
     ORDER BY netSales DESC;
-", repeated_params([$periodStart, $periodEnd], $filterParams));
+", array_merge($itemParams, [$periodStart, $periodEnd], $headerParams));
 
 $statusChartRows = array_values(array_filter($statusRows, function ($row) {
     return in_array($row['orderStatus'], ['Delivered', 'Cancelled'], true);
 }));
 
-$coverageRows = fetch_all($conn, "
-    WITH mtdSku AS (
-        SELECT TOP 15 sku, productName, SUM(qty) AS units, SUM(netSale) AS netSales
-        FROM dbo.OrderSummary
-        WHERE paymentDate >= ? AND paymentDate < ? {$filterSql}{$validSalesSql}
-        GROUP BY sku, productName
-        ORDER BY netSales DESC
-    ),
-    inv AS (
-        SELECT skuId, SUM(qty - pickLock - defectiveQty) AS availableQty
-        FROM dbo.GetWarehouseSkuInventorys
-        GROUP BY skuId
-    ),
-    sku_picture AS (
-        SELECT
-            skuId,
-            MAX(NULLIF(picture, '')) AS picture
-        FROM dbo.GetItemSkus
-        WHERE NULLIF(picture, '') IS NOT NULL
-        GROUP BY skuId
-    )
-    SELECT
-        m.sku,
-        m.productName,
-        m.units,
-        m.netSales,
-        COALESCE(i.availableQty, 0) AS availableQty,
-        CASE WHEN m.units > 0 THEN COALESCE(i.availableQty, 0) / (m.units * 1.0 / ?) ELSE NULL END AS daysCover,
-        s.picture
-    FROM mtdSku m
-    LEFT JOIN inv i ON m.sku = i.skuId
-    LEFT JOIN sku_picture s ON m.sku = s.skuId
-    ORDER BY m.netSales DESC;
-", array_merge(repeated_params([$periodStart, $periodEnd], $filterParams), [$dayOfMonth]));
-
-$afterSales = fetch_all($conn, "
-    SELECT TOP 8
-        status,
-        afterSaleType,
-        COUNT(DISTINCT afterSaleOrderId) AS cases,
-        SUM(refundAmount) AS refundAmount
-    FROM dbo.GetAfterSaleOrders
-    WHERE DATEADD(second, orderPayTime, '1970-01-01') >= ?
-      AND DATEADD(second, orderPayTime, '1970-01-01') < ?
-    GROUP BY status, afterSaleType
-    ORDER BY refundAmount DESC;
-", [$periodStart, $periodEnd]);
-
 /**
  * Daily-control alerts below all anchor to the latest COMPLETE day, not $maxDate.
- * OrderSummary receives orders in near-real-time (spot check: 1,500 orders already
- * booked by 09:51 on the current calendar day), so $maxDate itself is a partial day —
+ * The ETL loads orders well before the day is over, so $maxDate itself is a partial day —
  * comparing a half-finished day against a full-day baseline would flag every platform
  * as "underperforming" until the day closes. Independent of the date_range filter,
  * same rationale as offline's daily-control tools anchoring to its latest full day.
@@ -787,25 +731,28 @@ $latestCompleteDateNext = (clone $latestCompleteDate)->modify('+1 day')->format(
 
 // --- Cancel-Rate Watch: latest complete day vs trailing 30-day norm, by platform ---
 $cancelWatchRows = fetch_all($conn, "
-    WITH latest AS (
-        SELECT shopName, COUNT(DISTINCT orderId) AS orders_,
-            COUNT(DISTINCT CASE WHEN orderStatus = 'Cancelled' THEN orderId END) AS cancelled_,
-            SUM(CASE WHEN orderStatus = 'Cancelled' THEN netSale ELSE 0 END) AS lostNet
-        FROM dbo.OrderSummary
-        WHERE CAST(paymentDate AS date) = ? {$filterSql}
-        GROUP BY shopName
+    WITH {$itemAggCte},
+    latest AS (
+        SELECT o.platform AS shopName, COUNT(DISTINCT o.order_key) AS orders_,
+            COUNT(DISTINCT CASE WHEN o.order_status = 'Cancelled' THEN o.order_key END) AS cancelled_,
+            SUM(CASE WHEN o.order_status = 'Cancelled' THEN ia.netSales ELSE 0 END) AS lostNet
+        FROM fact_online_orders o
+        JOIN item_agg ia ON ia.order_key = o.order_key
+        WHERE CAST(o.order_datetime AS date) = ? {$headerSql}
+        GROUP BY o.platform
     ),
     norm AS (
-        SELECT shopName, COUNT(DISTINCT orderId) AS orders_,
-            COUNT(DISTINCT CASE WHEN orderStatus = 'Cancelled' THEN orderId END) AS cancelled_
-        FROM dbo.OrderSummary
-        WHERE paymentDate >= DATEADD(day, -30, ?) AND paymentDate < ? {$filterSql}
-        GROUP BY shopName
+        SELECT o.platform AS shopName, COUNT(DISTINCT o.order_key) AS orders_,
+            COUNT(DISTINCT CASE WHEN o.order_status = 'Cancelled' THEN o.order_key END) AS cancelled_
+        FROM fact_online_orders o
+        JOIN item_agg ia ON ia.order_key = o.order_key
+        WHERE o.order_datetime >= DATEADD(day, -30, ?) AND o.order_datetime < ? {$headerSql}
+        GROUP BY o.platform
     )
     SELECT l.shopName, l.orders_ AS latestOrders, l.cancelled_ AS latestCancelled, l.lostNet,
         n.orders_ AS normOrders, n.cancelled_ AS normCancelled
     FROM latest l LEFT JOIN norm n ON l.shopName = n.shopName;
-", array_merge([$latestCompleteDateStr], $filterParams, [$latestCompleteDateStr, $latestCompleteDateStr], $filterParams));
+", array_merge($itemParams, [$latestCompleteDateStr], $headerParams, [$latestCompleteDateStr, $latestCompleteDateStr], $headerParams));
 
 $cancelWatch = [];
 foreach ($cancelWatchRows as $row) {
@@ -831,23 +778,26 @@ usort($cancelWatch, fn($a, $b) => $b['lostNet'] <=> $a['lostNet']);
 
 // --- Platform Attention List: latest complete day vs same-weekday 4-week average ---
 $attentionRows = fetch_all($conn, "
-    WITH latest AS (
-        SELECT shopName, SUM(netSale) AS net
-        FROM dbo.OrderSummary
-        WHERE CAST(paymentDate AS date) = ? {$filterSql}{$validSalesSql}
-        GROUP BY shopName
+    WITH {$itemAggCte},
+    latest AS (
+        SELECT o.platform AS shopName, SUM(ia.netSales) AS net
+        FROM fact_online_orders o
+        JOIN item_agg ia ON ia.order_key = o.order_key
+        WHERE CAST(o.order_datetime AS date) = ? {$headerSql}{$validSalesSql}
+        GROUP BY o.platform
     ),
     baseline AS (
-        SELECT shopName, SUM(netSale) * 1.0 / COUNT(DISTINCT CAST(paymentDate AS date)) AS avgNet
-        FROM dbo.OrderSummary
-        WHERE CAST(paymentDate AS date) IN (DATEADD(week, -1, ?), DATEADD(week, -2, ?), DATEADD(week, -3, ?), DATEADD(week, -4, ?)) {$filterSql}{$validSalesSql}
-        GROUP BY shopName
+        SELECT o.platform AS shopName, SUM(ia.netSales) * 1.0 / COUNT(DISTINCT CAST(o.order_datetime AS date)) AS avgNet
+        FROM fact_online_orders o
+        JOIN item_agg ia ON ia.order_key = o.order_key
+        WHERE CAST(o.order_datetime AS date) IN (DATEADD(week, -1, ?), DATEADD(week, -2, ?), DATEADD(week, -3, ?), DATEADD(week, -4, ?)) {$headerSql}{$validSalesSql}
+        GROUP BY o.platform
     )
     SELECT b.shopName, ISNULL(l.net, 0) AS latestNet, b.avgNet
     FROM baseline b LEFT JOIN latest l ON b.shopName = l.shopName;
 ", array_merge(
-    [$latestCompleteDateStr], $filterParams,
-    [$latestCompleteDateStr, $latestCompleteDateStr, $latestCompleteDateStr, $latestCompleteDateStr], $filterParams
+    $itemParams, [$latestCompleteDateStr], $headerParams,
+    [$latestCompleteDateStr, $latestCompleteDateStr, $latestCompleteDateStr, $latestCompleteDateStr], $headerParams
 ));
 
 $attentionPlatforms = [];
@@ -868,23 +818,30 @@ foreach ($attentionRows as $row) {
 }
 usort($attentionPlatforms, fn($a, $b) => $a['ratio'] <=> $b['ratio']);
 
-// --- Discount Anomaly: latest complete day vs trailing 28-day norm, by platform ---
+/**
+ * Discount Anomaly uses o.discount_amount/o.subtotal (order header) rather than an
+ * item join, since item-level discount_per_item is unusable (always 0 in this ETL —
+ * see $itemAggCte comment above). The category/gift item filter is still applied, via
+ * EXISTS, to decide which orders qualify — just not to slice the discount amount.
+ */
 $discAnomalyRows = fetch_all($conn, "
     WITH latest AS (
-        SELECT shopName, SUM(disShop + disVC) AS disc, SUM(priceBeforeDisc) AS gross
-        FROM dbo.OrderSummary
-        WHERE CAST(paymentDate AS date) = ? {$filterSql}{$validSalesSql}
-        GROUP BY shopName
+        SELECT o.platform AS shopName, SUM(o.discount_amount) AS disc, SUM(o.subtotal) AS gross
+        FROM fact_online_orders o
+        WHERE CAST(o.order_datetime AS date) = ? {$headerSql}{$validSalesSql}
+          AND EXISTS (SELECT 1 FROM fact_online_order_items i WHERE i.order_key = o.order_key {$itemSql})
+        GROUP BY o.platform
     ),
     norm AS (
-        SELECT shopName, SUM(disShop + disVC) AS disc, SUM(priceBeforeDisc) AS gross
-        FROM dbo.OrderSummary
-        WHERE paymentDate >= DATEADD(day, -28, ?) AND paymentDate < ? {$filterSql}{$validSalesSql}
-        GROUP BY shopName
+        SELECT o.platform AS shopName, SUM(o.discount_amount) AS disc, SUM(o.subtotal) AS gross
+        FROM fact_online_orders o
+        WHERE o.order_datetime >= DATEADD(day, -28, ?) AND o.order_datetime < ? {$headerSql}{$validSalesSql}
+          AND EXISTS (SELECT 1 FROM fact_online_order_items i WHERE i.order_key = o.order_key {$itemSql})
+        GROUP BY o.platform
     )
     SELECT l.shopName, l.disc AS latestDisc, l.gross AS latestGross, n.disc AS normDisc, n.gross AS normGross
     FROM latest l LEFT JOIN norm n ON l.shopName = n.shopName;
-", array_merge([$latestCompleteDateStr], $filterParams, [$latestCompleteDateStr, $latestCompleteDateStr], $filterParams));
+", array_merge([$latestCompleteDateStr], $headerParams, $itemParams, [$latestCompleteDateStr, $latestCompleteDateStr], $headerParams, $itemParams));
 
 $discountAnomalies = [];
 foreach ($discAnomalyRows as $row) {
@@ -908,19 +865,24 @@ $mtdStartForProjStr = $mtdStartForProj->format('Y-m-d');
 $monthEndForProj = new DateTime($latestCompleteDate->format('Y-m-t'));
 
 $projActualRow = fetch_one($conn, "
-    SELECT SUM(netSale) AS net FROM dbo.OrderSummary
-    WHERE paymentDate >= ? AND paymentDate < ? {$filterSql}{$validSalesSql};
-", repeated_params([$mtdStartForProjStr, $latestCompleteDateNext], $filterParams));
+    WITH {$itemAggCte}
+    SELECT SUM(ia.netSales) AS net
+    FROM fact_online_orders o
+    JOIN item_agg ia ON ia.order_key = o.order_key
+    WHERE o.order_datetime >= ? AND o.order_datetime < ? {$headerSql}{$validSalesSql};
+", array_merge($itemParams, [$mtdStartForProjStr, $latestCompleteDateNext], $headerParams));
 $projActualSoFar = n($projActualRow['net'] ?? 0);
 
 $weekdayAvgRows = fetch_all($conn, "
+    WITH {$itemAggCte}
     SELECT DATEPART(weekday, d) AS dow, AVG(net) AS avgNet FROM (
-        SELECT CAST(paymentDate AS date) AS d, SUM(netSale) AS net
-        FROM dbo.OrderSummary
-        WHERE paymentDate >= DATEADD(day, -56, ?) AND paymentDate < ? {$filterSql}{$validSalesSql}
-        GROUP BY CAST(paymentDate AS date)
+        SELECT CAST(o.order_datetime AS date) AS d, SUM(ia.netSales) AS net
+        FROM fact_online_orders o
+        JOIN item_agg ia ON ia.order_key = o.order_key
+        WHERE o.order_datetime >= DATEADD(day, -56, ?) AND o.order_datetime < ? {$headerSql}{$validSalesSql}
+        GROUP BY CAST(o.order_datetime AS date)
     ) x GROUP BY DATEPART(weekday, d);
-", repeated_params([$latestCompleteDateNext, $latestCompleteDateNext], $filterParams));
+", array_merge($itemParams, [$latestCompleteDateNext, $latestCompleteDateNext], $headerParams));
 $weekdayAvg = [];
 foreach ($weekdayAvgRows as $row) {
     $weekdayAvg[(int) $row['dow']] = n($row['avgNet']);
@@ -937,9 +899,12 @@ $projectedMonthEnd = $projActualSoFar + $remainingProjected;
 
 $prevMonthStartForProj = (clone $mtdStartForProj)->modify('-1 month');
 $prevMonthRow = fetch_one($conn, "
-    SELECT SUM(netSale) AS net FROM dbo.OrderSummary
-    WHERE paymentDate >= ? AND paymentDate < ? {$filterSql}{$validSalesSql};
-", repeated_params([$prevMonthStartForProj->format('Y-m-d'), $mtdStartForProjStr], $filterParams));
+    WITH {$itemAggCte}
+    SELECT SUM(ia.netSales) AS net
+    FROM fact_online_orders o
+    JOIN item_agg ia ON ia.order_key = o.order_key
+    WHERE o.order_datetime >= ? AND o.order_datetime < ? {$headerSql}{$validSalesSql};
+", array_merge($itemParams, [$prevMonthStartForProj->format('Y-m-d'), $mtdStartForProjStr], $headerParams));
 $prevMonthActual = n($prevMonthRow['net'] ?? 0);
 $projVsPrevMonth = pct_change($projectedMonthEnd, $prevMonthActual);
 
@@ -950,9 +915,12 @@ $projVsLastYear = 0.0;
 if ($lyMonthHasReliableData) {
     $lyMonthEndForProj = (clone $lyMonthStartForProj)->modify('+1 month');
     $lyMonthRow = fetch_one($conn, "
-        SELECT SUM(netSale) AS net FROM dbo.OrderSummary
-        WHERE paymentDate >= ? AND paymentDate < ? {$filterSql}{$validSalesSql};
-    ", repeated_params([$lyMonthStartForProj->format('Y-m-d'), $lyMonthEndForProj->format('Y-m-d')], $filterParams));
+        WITH {$itemAggCte}
+        SELECT SUM(ia.netSales) AS net
+        FROM fact_online_orders o
+        JOIN item_agg ia ON ia.order_key = o.order_key
+        WHERE o.order_datetime >= ? AND o.order_datetime < ? {$headerSql}{$validSalesSql};
+    ", array_merge($itemParams, [$lyMonthStartForProj->format('Y-m-d'), $lyMonthEndForProj->format('Y-m-d')], $headerParams));
     $lyMonthActual = n($lyMonthRow['net'] ?? 0);
     $projVsLastYear = pct_change($projectedMonthEnd, $lyMonthActual);
 }
@@ -994,12 +962,40 @@ foreach ($statusRows as $row) {
     }
 }
 
-$lowCoverage = array_values(array_filter($coverageRows, function ($row) {
-    return n($row['daysCover']) > 0 && n($row['daysCover']) < 14;
-}));
-
 $topPlatform = $platforms[0] ?? null;
 $topProduct = $topProducts[0] ?? null;
+
+/**
+ * Peak Order Hours / Day-of-Week — pattern-insight charts (when do customers actually
+ * order), used for staffing/promo timing. Deliberately anchored to a fixed trailing
+ * 90-day window regardless of the page's date_range filter (a single day/month is too
+ * short to reveal an hour-of-day or weekday pattern) — same "daily control" convention
+ * as the cancel-rate/discount-anomaly sections above. Still respects the platform
+ * (branch) filter via $headerSql.
+ */
+$peakHoursRows = fetch_all($conn, "
+    SELECT DATEPART(hour, o.order_datetime) AS hr, COUNT(DISTINCT o.order_key) AS orders
+    FROM fact_online_orders o
+    WHERE o.order_datetime >= DATEADD(day, -90, ?) AND o.order_datetime < ?{$headerSql}{$validSalesSql}
+    GROUP BY DATEPART(hour, o.order_datetime)
+    ORDER BY hr;
+", array_merge([$maxDatePlusOne, $maxDatePlusOne], $headerParams));
+$peakHoursByHour = array_fill(0, 24, 0);
+foreach ($peakHoursRows as $row) {
+    $peakHoursByHour[(int) $row['hr']] = (int) n($row['orders']);
+}
+
+$weekdayOrderRows = fetch_all($conn, "
+    SELECT DATEPART(weekday, o.order_datetime) AS dow, COUNT(DISTINCT o.order_key) AS orders
+    FROM fact_online_orders o
+    WHERE o.order_datetime >= DATEADD(day, -90, ?) AND o.order_datetime < ?{$headerSql}{$validSalesSql}
+    GROUP BY DATEPART(weekday, o.order_datetime)
+    ORDER BY dow;
+", array_merge([$maxDatePlusOne, $maxDatePlusOne], $headerParams));
+$weekdayOrdersByDow = array_fill(1, 7, 0); // SQL Server DATEPART(weekday): Sun=1..Sat=7
+foreach ($weekdayOrderRows as $row) {
+    $weekdayOrdersByDow[(int) $row['dow']] = (int) n($row['orders']);
+}
 
 $pageTitle = ui_text($ui, 'page_title');
 $pageSubtitle = ui_text($ui, 'page_subtitle');
@@ -1008,27 +1004,83 @@ require_once __DIR__ . '/includes/header.php';
 ?>
 
 <style>
-    .online-hero { background: #111827; color: #fff; padding: 28px; border-radius: 8px; margin-bottom: 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
-    .online-hero-top { display: flex; justify-content: space-between; gap: 24px; align-items: flex-start; }
-    .online-hero-title { font-size: 13px; color: rgba(255,255,255,0.72); text-transform: uppercase; font-weight: 600; }
-    .online-hero-value { font-size: 44px; line-height: 1.1; font-weight: 300; margin-top: 8px; }
-    .online-hero-trend { margin-top: 8px; font-size: 13px; }
-    .online-hero-meta { text-align: right; color: rgba(255,255,255,0.78); font-size: 13px; }
+    .online-hero {
+        position: relative;
+        overflow: hidden;
+        isolation: isolate;
+        background:
+            radial-gradient(circle at 105% -10%, rgba(201,162,39,0.28) 0%, rgba(201,162,39,0) 42%),
+            radial-gradient(circle at -5% 115%, rgba(58,79,140,0.30) 0%, rgba(58,79,140,0) 48%),
+            linear-gradient(160deg, #0c1220 0%, #171f34 100%);
+        color: #fff;
+        padding: 34px 36px;
+        border-radius: 12px;
+        margin-bottom: 28px;
+        box-shadow: 0 10px 28px rgba(12,18,32,0.28);
+    }
+    .online-hero::before {
+        content: '';
+        position: absolute; inset: 0;
+        background-image: radial-gradient(rgba(255,255,255,0.06) 1px, transparent 1px);
+        background-size: 16px 16px;
+        -webkit-mask-image: linear-gradient(160deg, rgba(0,0,0,0.9), rgba(0,0,0,0) 70%);
+        mask-image: linear-gradient(160deg, rgba(0,0,0,0.9), rgba(0,0,0,0) 70%);
+        z-index: 0;
+    }
+    .online-hero::after {
+        content: '';
+        position: absolute; right: -34px; bottom: -34px; width: 200px; height: 200px;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23c9a227' stroke-width='1'%3E%3Cpath d='M3 17l6-6 4 4 8-8'/%3E%3Cpath d='M15 7h6v6'/%3E%3C/svg%3E");
+        background-repeat: no-repeat; background-size: contain;
+        opacity: 0.1; z-index: 0; pointer-events: none;
+    }
+    .online-hero-top { position: relative; z-index: 1; display: flex; justify-content: space-between; gap: 28px; align-items: flex-start; }
+    .online-hero-title { position: relative; padding-left: 16px; font-size: 13px; color: rgba(255,255,255,0.72); text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; }
+    .online-hero-title::before {
+        content: ''; position: absolute; left: 0; top: 50%; transform: translateY(-50%);
+        width: 8px; height: 8px; border-radius: 999px; background: #34d399;
+        box-shadow: 0 0 0 0 rgba(52,211,153,0.55);
+        animation: hero-live-pulse 2.2s ease-out infinite;
+    }
+    @keyframes hero-live-pulse {
+        0% { box-shadow: 0 0 0 0 rgba(52,211,153,0.55); }
+        70% { box-shadow: 0 0 0 7px rgba(52,211,153,0); }
+        100% { box-shadow: 0 0 0 0 rgba(52,211,153,0); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+        .online-hero-title::before { animation: none; }
+    }
+    .online-hero-value { font-size: 54px; line-height: 1.05; font-weight: 300; letter-spacing: -0.02em; margin-top: 10px; font-variant-numeric: tabular-nums; }
+    .online-hero-value::before { content: '฿'; font-size: 0.5em; font-weight: 500; color: rgba(255,255,255,0.55); margin-right: 6px; }
+    .online-hero-trend { margin-top: 10px; font-size: 13px; }
+    .online-hero-meta { position: relative; z-index: 1; text-align: right; color: rgba(255,255,255,0.78); font-size: 13px; padding-left: 24px; border-left: 1px solid rgba(255,255,255,0.14); }
+    .online-hero-meta .hero-chip { display: inline-block; margin-top: 6px; padding: 4px 10px; border-radius: 999px; background: rgba(255,255,255,0.08); font-size: 11px; }
+    .metric-grid .kpi-card .value { font-variant-numeric: tabular-nums; }
+    .metric-grid .kpi-card .label { padding-bottom: 10px; border-bottom: 1px solid #F3F4F6; }
     .metric-grid .kpi-card .target-line { color: #6B7280; font-size: 12px; line-height: 1.45; margin-top: 8px; }
     .change.positive { color: #10B981; }
     .change.negative { color: #EF4444; }
     .change.neutral { color: #9CA3AF; }
-    .section-title { display: flex; justify-content: space-between; align-items: center; margin: 6px 0 14px; }
-    .section-title h2 { margin: 0; font-size: 16px; font-weight: 600; color: #111827; }
+    .section-title { display: flex; justify-content: space-between; align-items: center; margin: 36px 0 16px; }
+    .section-title:first-of-type { margin-top: 6px; }
+    .section-title h2 { display: flex; align-items: center; gap: 10px; margin: 0; font-size: 16px; font-weight: 600; color: #111827; }
+    .section-title h2::before { content: ''; width: 4px; height: 16px; border-radius: 2px; background: #c9a227; flex: 0 0 auto; }
     .section-title span { font-size: 12px; color: #6B7280; }
     .metric-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin-bottom: 24px; }
     .analysis-grid { display: grid; grid-template-columns: 1.35fr 1fr; gap: 20px; margin-bottom: 24px; }
     .three-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-bottom: 24px; }
     .ops-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 24px; }
-    .ops-card { background: #fff; border-radius: 8px; padding: 18px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
-    .ops-card .label { color: #6B7280; font-size: 12px; font-weight: 600; text-transform: uppercase; }
-    .ops-card .value { color: #111827; font-size: 32px; font-weight: 300; margin: 8px 0 4px; }
+    .ops-card { background: #fff; border-radius: 8px; padding: 18px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); transition: box-shadow 0.2s ease, transform 0.2s ease; }
+    .ops-card:hover { box-shadow: 0 6px 16px rgba(0,0,0,0.1); transform: translateY(-1px); }
+    .ops-card .label { color: #6B7280; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; }
+    .ops-card .value { color: #111827; font-size: 32px; font-weight: 300; margin: 8px 0 4px; font-variant-numeric: tabular-nums; }
     .ops-card .note { color: #9CA3AF; font-size: 12px; }
+    .chart-card h3, .table-card h3 { padding-bottom: 12px; margin-bottom: 16px; border-bottom: 1px solid #F3F4F6; }
+    .chart-card, .table-card { transition: box-shadow 0.2s ease; }
+    .chart-card:hover, .table-card:hover { box-shadow: 0 4px 14px rgba(0,0,0,0.09); }
+    .table-card table tbody tr { transition: background-color 0.15s ease; }
+    .table-card table tbody tr:nth-child(even) { background: #FAFBFC; }
+    .table-card table tbody tr:hover { background: #FBF6E7; }
     .chart-box { height: 300px; }
     .chart-box.small { height: 240px; }
     .status-pill { display: inline-block; padding: 4px 10px; border-radius: 12px; font-size: 11px; font-weight: 600; background: #F3F4F6; color: #6B7280; }
@@ -1067,15 +1119,15 @@ require_once __DIR__ . '/includes/header.php';
 <div class="online-hero">
     <div class="online-hero-top">
         <div>
-            <div class="online-hero-title"><?php echo htmlspecialchars(ui_text($ui, 'hero_title')); ?></div>
-            <div class="online-hero-value"><?php echo number_format($mtdNetSales, 0); ?></div>
+            <div class="online-hero-title"><?php echo htmlspecialchars(ui_text($ui, 'hero_title_' . $filterValues['date_range'])); ?></div>
+            <div class="online-hero-value count-up" data-count-to="<?php echo (float) $mtdNetSales; ?>">0</div>
             <div class="online-hero-trend"><?php echo $growthBadge($salesGrowth); ?></div>
         </div>
         <div class="online-hero-meta">
             <div><?php echo htmlspecialchars($periodLabel); ?></div>
             <div><?php echo htmlspecialchars(ui_text($ui, 'source_ordersummary')); ?></div>
             <?php if ($excludedNet > 0 || $excludedOrders > 0): ?>
-                <div><?php echo htmlspecialchars(ui_text($ui, 'excluded_note')); ?> <?php echo number_format($excludedNet, 0); ?> (<?php echo number_format($excludedOrders); ?> <?php echo htmlspecialchars(ui_text($ui, 'excluded_orders')); ?>)</div>
+                <div class="hero-chip"><?php echo htmlspecialchars(ui_text($ui, 'excluded_note')); ?> <?php echo number_format($excludedNet, 0); ?> (<?php echo number_format($excludedOrders); ?> <?php echo htmlspecialchars(ui_text($ui, 'excluded_orders')); ?>)</div>
             <?php endif; ?>
         </div>
     </div>
@@ -1084,22 +1136,22 @@ require_once __DIR__ . '/includes/header.php';
 <div class="metric-grid">
     <div class="kpi-card">
         <div class="label"><?php echo htmlspecialchars(ui_text($ui, 'orders')); ?></div>
-        <div class="value"><?php echo number_format($mtdOrders, 0); ?></div>
+        <div class="value count-up" data-count-to="<?php echo (float) $mtdOrders; ?>">0</div>
         <?php echo $growthBadge($orderGrowth); ?>
     </div>
     <div class="kpi-card">
         <div class="label"><?php echo htmlspecialchars(ui_text($ui, 'units_sold')); ?></div>
-        <div class="value"><?php echo number_format($mtdUnits, 0); ?></div>
+        <div class="value count-up" data-count-to="<?php echo (float) $mtdUnits; ?>">0</div>
         <?php echo $growthBadge($unitGrowth); ?>
     </div>
     <div class="kpi-card">
         <div class="label"><?php echo htmlspecialchars(ui_text($ui, 'aov')); ?></div>
-        <div class="value"><?php echo number_format($mtdAov, 0); ?></div>
+        <div class="value count-up" data-count-to="<?php echo (float) $mtdAov; ?>">0</div>
         <?php echo $growthBadge($aovGrowth); ?>
     </div>
     <div class="kpi-card">
         <div class="label"><?php echo htmlspecialchars(ui_text($ui, 'upt')); ?></div>
-        <div class="value"><?php echo number_format($mtdUpt, 2); ?></div>
+        <div class="value count-up" data-count-to="<?php echo (float) $mtdUpt; ?>" data-decimals="2">0</div>
         <div class="change positive"><?php echo htmlspecialchars(ui_text($ui, 'units_per_transaction')); ?></div>
         <div class="target-line"><?php echo htmlspecialchars(ui_text($ui, 'top_platform')); ?> <?php echo htmlspecialchars($topPlatform['shopName'] ?? '-'); ?> | <?php echo htmlspecialchars(ui_text($ui, 'top_sku')); ?> <?php echo htmlspecialchars($topProduct['sku'] ?? '-'); ?></div>
     </div>
@@ -1120,11 +1172,7 @@ require_once __DIR__ . '/includes/header.php';
     </div>
 </div>
 
-<div class="three-grid">
-    <div class="chart-card">
-        <h3><?php echo htmlspecialchars(ui_text($ui, 'payment_mix')); ?></h3>
-        <div class="chart-box small"><canvas id="paymentChart"></canvas></div>
-    </div>
+<div class="analysis-grid">
     <div class="chart-card">
         <h3><?php echo htmlspecialchars(ui_text($ui, 'product_mix')); ?></h3>
         <div class="chart-box small"><canvas id="productMixChart"></canvas></div>
@@ -1132,6 +1180,17 @@ require_once __DIR__ . '/includes/header.php';
     <div class="chart-card">
         <h3><?php echo htmlspecialchars(ui_text($ui, 'order_status')); ?></h3>
         <div class="chart-box small"><canvas id="statusChart"></canvas></div>
+    </div>
+</div>
+
+<div class="analysis-grid">
+    <div class="chart-card">
+        <h3><?php echo htmlspecialchars(ui_text($ui, 'peak_hours_chart')); ?><?php echo hint_icon(ui_text($ui, 'tooltip_peak_hours')); ?></h3>
+        <div class="chart-box small"><canvas id="peakHoursChart"></canvas></div>
+    </div>
+    <div class="chart-card">
+        <h3><?php echo htmlspecialchars(ui_text($ui, 'weekday_orders_chart')); ?><?php echo hint_icon(ui_text($ui, 'tooltip_weekday_orders')); ?></h3>
+        <div class="chart-box small"><canvas id="weekdayOrdersChart"></canvas></div>
     </div>
 </div>
 
@@ -1164,14 +1223,13 @@ require_once __DIR__ . '/includes/header.php';
 
     <div class="table-card">
         <h3><?php echo htmlspecialchars(ui_text($ui, 'top_products')); ?></h3>
-        <div class="table-note"><?php echo htmlspecialchars(ui_text($ui, 'gift_excluded')); ?></div>
+        <div class="table-note"><?php echo htmlspecialchars(sprintf(ui_text($ui, 'gift_excluded'), ui_text($ui, $filterValues['date_range']))); ?></div>
         <table>
             <thead>
             <tr>
                 <th><?php echo htmlspecialchars(ui_text($ui, 'product')); ?></th>
                 <th><?php echo htmlspecialchars(ui_text($ui, 'net_sales')); ?></th>
                 <th><?php echo htmlspecialchars(ui_text($ui, 'units')); ?></th>
-                <th><?php echo htmlspecialchars(ui_text($ui, 'disc_pct')); ?></th>
             </tr>
             </thead>
             <tbody>
@@ -1179,16 +1237,15 @@ require_once __DIR__ . '/includes/header.php';
                 <tr>
                     <td>
                         <div class="product-cell">
-                            <?php echo product_image_html($row['picture'] ?? null, (string) $row['sku']); ?>
+                            <?php echo product_image_html(null, (string) $row['sku']); ?>
                             <div class="product-meta">
-                                <div class="sku"><?php echo htmlspecialchars($row['sku']); ?></div>
+                                <div class="sku"><?php echo htmlspecialchars($row['sku'] ?? ''); ?></div>
                                 <div class="name"><?php echo htmlspecialchars(mb_strimwidth($row['productName'], 0, 52, '...')); ?></div>
                             </div>
                         </div>
                     </td>
                     <td><?php echo number_format(n($row['netSales']), 0); ?></td>
                     <td><?php echo number_format(n($row['units']), 0); ?></td>
-                    <td><?php echo number_format(n($row['discountRate']), 1); ?>%</td>
                 </tr>
             <?php endforeach; ?>
             </tbody>
@@ -1212,11 +1269,6 @@ require_once __DIR__ . '/includes/header.php';
         <?php if ($excludedNet > 0): ?>
             <div class="note"><?php echo htmlspecialchars(ui_text($ui, 'lost_revenue')); ?><?php echo hint_icon(ui_text($ui, 'tooltip_lost_revenue')); ?>: <?php echo number_format($excludedNet, 0); ?></div>
         <?php endif; ?>
-    </div>
-    <div class="ops-card">
-        <div class="label"><?php echo htmlspecialchars(ui_text($ui, 'low_cover_skus')); ?></div>
-        <div class="value"><?php echo number_format(count($lowCoverage)); ?></div>
-        <div class="note"><?php echo htmlspecialchars(ui_text($ui, 'under_14_days')); ?></div>
     </div>
     <div class="ops-card">
         <?php echo hint_icon(ui_text($ui, 'tooltip_projection')); ?>
@@ -1305,107 +1357,66 @@ require_once __DIR__ . '/includes/header.php';
     </div>
 </div>
 
-<div class="split-grid">
-    <div class="table-card">
-        <h3><?php echo htmlspecialchars(ui_text($ui, 'disc_anomaly_title')); ?><?php echo hint_icon(ui_text($ui, 'tooltip_disc_anomaly')); ?></h3>
-        <div class="table-note"><?php echo htmlspecialchars(ui_text($ui, 'disc_anomaly_subtitle')); ?> · <?php echo htmlspecialchars($latestCompleteDate->format('j M Y')); ?></div>
-        <?php if (empty($discountAnomalies)): ?>
-            <div class="ok-state"><span class="dot"></span><?php echo htmlspecialchars(ui_text($ui, 'disc_anomaly_ok')); ?></div>
-        <?php else: ?>
-            <table>
-                <thead>
-                <tr>
-                    <th><?php echo htmlspecialchars(ui_text($ui, 'platform')); ?></th>
-                    <th><?php echo htmlspecialchars(ui_text($ui, 'disc_latest_col')); ?></th>
-                    <th><?php echo htmlspecialchars(ui_text($ui, 'disc_norm_col')); ?></th>
-                    <th><?php echo htmlspecialchars(ui_text($ui, 'disc_diff_col')); ?></th>
-                    <th><?php echo htmlspecialchars(ui_text($ui, 'gross_col')); ?></th>
-                </tr>
-                </thead>
-                <tbody>
-                <?php foreach ($discountAnomalies as $row): ?>
-                    <tr>
-                        <td><span class="badge online"><?php echo htmlspecialchars($row['shopName']); ?></span></td>
-                        <td><span class="status-pill medium"><?php echo number_format($row['latestPct'], 1); ?>%</span></td>
-                        <td><?php echo number_format($row['normPct'], 1); ?>%</td>
-                        <td>+<?php echo number_format($row['diff'], 1); ?>pp</td>
-                        <td><?php echo number_format($row['gross'], 0); ?></td>
-                    </tr>
-                <?php endforeach; ?>
-                </tbody>
-            </table>
-        <?php endif; ?>
-    </div>
-
-    <div class="table-card">
-        <h3><?php echo htmlspecialchars(ui_text($ui, 'stock_coverage')); ?></h3>
+<div class="table-card" style="margin-bottom: 24px;">
+    <h3><?php echo htmlspecialchars(ui_text($ui, 'disc_anomaly_title')); ?><?php echo hint_icon(ui_text($ui, 'tooltip_disc_anomaly')); ?></h3>
+    <div class="table-note"><?php echo htmlspecialchars(ui_text($ui, 'disc_anomaly_subtitle')); ?> · <?php echo htmlspecialchars($latestCompleteDate->format('j M Y')); ?></div>
+    <?php if (empty($discountAnomalies)): ?>
+        <div class="ok-state"><span class="dot"></span><?php echo htmlspecialchars(ui_text($ui, 'disc_anomaly_ok')); ?></div>
+    <?php else: ?>
         <table>
             <thead>
             <tr>
-                <th><?php echo htmlspecialchars(ui_text($ui, 'product')); ?></th>
-                <th><?php echo htmlspecialchars(ui_text($ui, 'sales')); ?></th>
-                <th><?php echo htmlspecialchars(ui_text($ui, 'stock')); ?></th>
-                <th><?php echo htmlspecialchars(ui_text($ui, 'cover')); ?><?php echo hint_icon(ui_text($ui, 'tooltip_cover')); ?></th>
+                <th><?php echo htmlspecialchars(ui_text($ui, 'platform')); ?></th>
+                <th><?php echo htmlspecialchars(ui_text($ui, 'disc_latest_col')); ?></th>
+                <th><?php echo htmlspecialchars(ui_text($ui, 'disc_norm_col')); ?></th>
+                <th><?php echo htmlspecialchars(ui_text($ui, 'disc_diff_col')); ?></th>
+                <th><?php echo htmlspecialchars(ui_text($ui, 'gross_col')); ?></th>
             </tr>
             </thead>
             <tbody>
-            <?php foreach (array_slice($coverageRows, 0, 10) as $row): ?>
-                <?php $cover = n($row['daysCover']); ?>
+            <?php foreach ($discountAnomalies as $row): ?>
                 <tr>
-                    <td>
-                        <div class="product-cell">
-                            <?php echo product_image_html($row['picture'] ?? null, (string) $row['sku']); ?>
-                            <div class="product-meta">
-                                <div class="sku"><?php echo htmlspecialchars($row['sku']); ?></div>
-                                <div class="name"><?php echo htmlspecialchars(mb_strimwidth($row['productName'], 0, 52, '...')); ?></div>
-                            </div>
-                        </div>
-                    </td>
-                    <td><?php echo number_format(n($row['netSales']), 0); ?></td>
-                    <td><?php echo number_format(n($row['availableQty']), 0); ?></td>
-                    <td>
-                        <?php if (n($row['availableQty']) <= 0): ?>
-                            <span class="status-pill high"><?php echo htmlspecialchars(ui_text($ui, 'out_of_stock')); ?></span>
-                        <?php else: ?>
-                            <span class="status-pill <?php echo $cover < 14 ? 'high' : ($cover < 21 ? 'medium' : 'low'); ?>"><?php echo number_format($cover, 1); ?> <?php echo htmlspecialchars(ui_text($ui, 'days')); ?></span>
-                        <?php endif; ?>
-                    </td>
+                    <td><span class="badge online"><?php echo htmlspecialchars($row['shopName']); ?></span></td>
+                    <td><span class="status-pill medium"><?php echo number_format($row['latestPct'], 1); ?>%</span></td>
+                    <td><?php echo number_format($row['normPct'], 1); ?>%</td>
+                    <td>+<?php echo number_format($row['diff'], 1); ?>pp</td>
+                    <td><?php echo number_format($row['gross'], 0); ?></td>
                 </tr>
             <?php endforeach; ?>
             </tbody>
         </table>
-    </div>
+    <?php endif; ?>
 </div>
 
-<div class="split-grid">
-    <div class="table-card">
-        <h3><?php echo htmlspecialchars(ui_text($ui, 'after_sales_queue')); ?></h3>
-        <table>
-            <thead>
-            <tr>
-                <th><?php echo htmlspecialchars(ui_text($ui, 'status')); ?></th>
-                <th><?php echo htmlspecialchars(ui_text($ui, 'type')); ?></th>
-                <th><?php echo htmlspecialchars(ui_text($ui, 'cases')); ?></th>
-                <th><?php echo htmlspecialchars(ui_text($ui, 'refund')); ?></th>
-            </tr>
-            </thead>
-            <tbody>
-            <?php foreach ($afterSales as $row): ?>
-                <tr>
-                    <td><?php echo htmlspecialchars($row['status']); ?></td>
-                    <td><?php echo htmlspecialchars($row['afterSaleType']); ?></td>
-                    <td><?php echo number_format(n($row['cases']), 0); ?></td>
-                    <td><?php echo number_format(n($row['refundAmount']), 0); ?></td>
-                </tr>
-            <?php endforeach; ?>
-            </tbody>
-        </table>
-    </div>
+<div class="chart-card" style="margin-bottom: 24px;">
+    <h3><?php echo htmlspecialchars(ui_text($ui, 'discount_tier_trend')); ?><?php echo hint_icon(ui_text($ui, 'tooltip_discount_tier_trend')); ?></h3>
+    <div class="chart-box"><canvas id="discountTierTrendChart"></canvas></div>
 </div>
 
 <script>
 const chartColors = ['#c9a227', '#1a1a2e', '#10B981', '#3B82F6', '#EF4444', '#F59E0B', '#6B7280'];
 const numberFormat = new Intl.NumberFormat('<?php echo $uiLanguage === 'th' ? 'th-TH' : 'en-US'; ?>');
+
+// Count-up animation for hero + KPI card values on page load
+document.querySelectorAll('.count-up').forEach(function (el) {
+    const target = parseFloat(el.dataset.countTo) || 0;
+    const decimals = parseInt(el.dataset.decimals, 10) || 0;
+    const prefix = el.dataset.prefix || '';
+    const suffix = el.dataset.suffix || '';
+    const duration = 1200;
+    const startTime = performance.now();
+    const fmt = new Intl.NumberFormat('th-TH', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+
+    function tick(now) {
+        const progress = Math.min((now - startTime) / duration, 1);
+        const eased = 1 - Math.pow(1 - progress, 3);
+        el.textContent = prefix + fmt.format(target * eased) + suffix;
+        if (progress < 1) {
+            requestAnimationFrame(tick);
+        }
+    }
+    requestAnimationFrame(tick);
+});
 
 window.updateDashboardData = function () {
     document.querySelector('.filter-bar').submit();
@@ -1453,6 +1464,49 @@ new Chart(document.getElementById('dailySalesChart'), {
     }
 });
 
+new Chart(document.getElementById('discountTierTrendChart'), {
+    type: 'bar',
+    data: {
+        labels: <?php echo json_encode(array_column($dailyTrend, 'saleDate')); ?>,
+        datasets: [
+            {
+                label: <?php echo json_encode(ui_text($ui, 'no_discount')); ?>,
+                data: <?php echo json_encode(array_values($discountTierTrend['no_discount'])); ?>,
+                backgroundColor: '#10B981',
+                borderWidth: 0,
+                borderRadius: 4
+            },
+            {
+                label: <?php echo json_encode(ui_text($ui, 'discounted')); ?>,
+                data: <?php echo json_encode(array_values($discountTierTrend['discounted'])); ?>,
+                backgroundColor: '#F59E0B',
+                borderWidth: 0,
+                borderRadius: 4
+            },
+            {
+                label: <?php echo json_encode(ui_text($ui, 'high_discount')); ?>,
+                data: <?php echo json_encode(array_values($discountTierTrend['high_discount'])); ?>,
+                backgroundColor: '#EF4444',
+                borderWidth: 0,
+                borderRadius: 4
+            }
+        ]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+            legend: { position: 'top', align: 'end', labels: { usePointStyle: true } },
+            tooltip: { callbacks: { label: ctx => ctx.dataset.label + ': ' + numberFormat.format(ctx.raw) } }
+        },
+        scales: {
+            x: { stacked: true, grid: { display: false }, ticks: { color: '#6B7280', maxRotation: 45 } },
+            y: { stacked: true, ticks: { callback: shortNumber, color: '#6B7280' }, grid: { color: 'rgba(0,0,0,0.05)' } }
+        }
+    }
+});
+
 new Chart(document.getElementById('platformShareChart'), {
     type: 'doughnut',
     data: {
@@ -1468,30 +1522,6 @@ new Chart(document.getElementById('platformShareChart'), {
         maintainAspectRatio: false,
         cutout: '65%',
         plugins: { legend: { position: 'bottom', labels: { usePointStyle: true, boxWidth: 8 } } }
-    }
-});
-
-new Chart(document.getElementById('paymentChart'), {
-    type: 'bar',
-    data: {
-        labels: <?php echo json_encode(array_column($payments, 'paymentGroup')); ?>,
-        datasets: [{
-            label: <?php echo json_encode(ui_text($ui, 'chart_net_sales')); ?>,
-            data: <?php echo json_encode(array_map('n', array_column($payments, 'netSales'))); ?>,
-            backgroundColor: '#1a1a2e',
-            borderWidth: 0,
-            borderRadius: 4
-        }]
-    },
-    options: {
-        indexAxis: 'y',
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: { legend: { display: false } },
-        scales: {
-            x: { ticks: { callback: shortNumber, color: '#6B7280' }, grid: { color: 'rgba(0,0,0,0.05)' } },
-            y: { grid: { display: false }, ticks: { color: '#111827' } }
-        }
     }
 });
 
@@ -1535,6 +1565,55 @@ new Chart(document.getElementById('statusChart'), {
         maintainAspectRatio: false,
         cutout: '62%',
         plugins: { legend: { position: 'bottom', labels: { usePointStyle: true, boxWidth: 8 } } }
+    }
+});
+
+new Chart(document.getElementById('peakHoursChart'), {
+    type: 'bar',
+    data: {
+        labels: <?php echo json_encode(array_map(fn($h) => sprintf('%02d:00', $h), array_keys($peakHoursByHour))); ?>,
+        datasets: [{
+            label: <?php echo json_encode(ui_text($ui, 'orders')); ?>,
+            data: <?php echo json_encode(array_values($peakHoursByHour)); ?>,
+            backgroundColor: '#c9a227',
+            borderWidth: 0,
+            borderRadius: 4
+        }]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+            x: { grid: { display: false }, ticks: { color: '#6B7280', maxRotation: 0, autoSkip: true, maxTicksLimit: 12 } },
+            y: { ticks: { callback: shortNumber, color: '#6B7280' }, grid: { color: 'rgba(0,0,0,0.05)' } }
+        }
+    }
+});
+
+new Chart(document.getElementById('weekdayOrdersChart'), {
+    type: 'bar',
+    data: {
+        labels: <?php echo json_encode([
+            $uiLanguage === 'th' ? 'อา' : 'Sun', $uiLanguage === 'th' ? 'จ' : 'Mon', $uiLanguage === 'th' ? 'อ' : 'Tue',
+            $uiLanguage === 'th' ? 'พ' : 'Wed', $uiLanguage === 'th' ? 'พฤ' : 'Thu', $uiLanguage === 'th' ? 'ศ' : 'Fri', $uiLanguage === 'th' ? 'ส' : 'Sat',
+        ]); ?>,
+        datasets: [{
+            label: <?php echo json_encode(ui_text($ui, 'orders')); ?>,
+            data: <?php echo json_encode(array_values($weekdayOrdersByDow)); ?>,
+            backgroundColor: '#1a1a2e',
+            borderWidth: 0,
+            borderRadius: 4
+        }]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+            x: { grid: { display: false }, ticks: { color: '#6B7280' } },
+            y: { ticks: { callback: shortNumber, color: '#6B7280' }, grid: { color: 'rgba(0,0,0,0.05)' } }
+        }
     }
 });
 </script>
