@@ -78,6 +78,7 @@ consignment sales source yet.
 | Branches table | Real Offline branches (`FactSales`/`DimBranch`) + the two mock Consignment branches appended | Real branches don't carry a `lat`/`lng`/`region`/per-platform `channels` breakdown (those were unused/fictional in the old mock — verified not referenced anywhere in the rendered markup) |
 | Top Online Products / Top Offline Products | Two separate real lists — `fact_online_order_items`/`DimOnlineProduct` for Online, `FactSales`/`DimProduct` for Offline | Not merged: `DimProduct.ProductCode` and `DimOnlineProduct.sku_code` only overlap on ~204 of ~1,379 coded online SKUs |
 | Monthly Trend chart | Real last-12-months for Online (by platform) and Offline; Consignment is a flat run-rate (average of the old mock's 12 monthly values) | X-axis anchors to whichever of Online/Offline has the more recent month, so a lagging source shows trailing zeros rather than truncating the other |
+| Total Sales Trend chart (current vs previous period) | Real Online (`fact_online_orders`) + Offline (`FactSales`) bucketed by hour/day/month depending on `date_range`; Consignment is a flat estimate spread evenly across buckets | Granularity follows `date_range`: Today→hourly, MTD→daily (day-of-month), YTD→monthly (Jan..current). `FactSales` has no time-of-day column, so Offline's hourly (Today) view is its daily total divided by 24 — an estimate, not real intraday data |
 
 **Dead code, left untouched (pre-existing, not introduced by this work):**
 - The "Executive Alerts" card (hardcoded Shopee/TikTok/Lazada messages) is wrapped

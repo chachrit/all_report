@@ -1005,7 +1005,7 @@ foreach ($weekdayOrderRows as $row) {
 
 $pageTitle = ui_text($ui, 'page_title');
 $pageSubtitle = ui_text($ui, 'page_subtitle');
-$accentColor = '#c9a227';
+$accentColor = '#dab937'; // Journal brand Gold (116C) — see BRAND_COLORS.md
 require_once __DIR__ . '/includes/header.php';
 ?>
 
@@ -1013,32 +1013,13 @@ require_once __DIR__ . '/includes/header.php';
     .online-hero {
         position: relative;
         overflow: hidden;
-        isolation: isolate;
-        background:
-            radial-gradient(circle at 105% -10%, rgba(201,162,39,0.28) 0%, rgba(201,162,39,0) 42%),
-            radial-gradient(circle at -5% 115%, rgba(58,79,140,0.30) 0%, rgba(58,79,140,0) 48%),
-            linear-gradient(160deg, #0c1220 0%, #171f34 100%);
+        background: #091113;
+        border-left: 4px solid var(--accent);
         color: #fff;
         padding: 34px 36px;
         border-radius: 12px;
         margin-bottom: 28px;
         box-shadow: 0 10px 28px rgba(12,18,32,0.28);
-    }
-    .online-hero::before {
-        content: '';
-        position: absolute; inset: 0;
-        background-image: radial-gradient(rgba(255,255,255,0.06) 1px, transparent 1px);
-        background-size: 16px 16px;
-        -webkit-mask-image: linear-gradient(160deg, rgba(0,0,0,0.9), rgba(0,0,0,0) 70%);
-        mask-image: linear-gradient(160deg, rgba(0,0,0,0.9), rgba(0,0,0,0) 70%);
-        z-index: 0;
-    }
-    .online-hero::after {
-        content: '';
-        position: absolute; right: -34px; bottom: -34px; width: 200px; height: 200px;
-        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23c9a227' stroke-width='1'%3E%3Cpath d='M3 17l6-6 4 4 8-8'/%3E%3Cpath d='M15 7h6v6'/%3E%3C/svg%3E");
-        background-repeat: no-repeat; background-size: contain;
-        opacity: 0.1; z-index: 0; pointer-events: none;
     }
     .online-hero-top { position: relative; z-index: 1; display: flex; justify-content: space-between; gap: 28px; align-items: flex-start; }
     .online-hero-title { position: relative; padding-left: 16px; font-size: 13px; color: rgba(255,255,255,0.72); text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; }
@@ -1070,7 +1051,7 @@ require_once __DIR__ . '/includes/header.php';
     .section-title { display: flex; justify-content: space-between; align-items: center; margin: 36px 0 16px; }
     .section-title:first-of-type { margin-top: 6px; }
     .section-title h2 { display: flex; align-items: center; gap: 10px; margin: 0; font-size: 16px; font-weight: 600; color: #111827; }
-    .section-title h2::before { content: ''; width: 4px; height: 16px; border-radius: 2px; background: #c9a227; flex: 0 0 auto; }
+    .section-title h2::before { content: ''; width: 4px; height: 16px; border-radius: 2px; background: var(--accent); flex: 0 0 auto; }
     .section-title span { font-size: 12px; color: #6B7280; }
     .metric-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin-bottom: 24px; }
     .analysis-grid { display: grid; grid-template-columns: 1.35fr 1fr; gap: 20px; margin-bottom: 24px; }
@@ -1122,6 +1103,7 @@ require_once __DIR__ . '/includes/header.php';
     }
 </style>
 
+<div class="dash-section" data-section-id="kpi-cards" data-section-label-th="ตัวเลข KPI หลัก" data-section-label-en="Headline KPIs">
 <div class="online-hero">
     <div class="online-hero-top">
         <div>
@@ -1162,7 +1144,9 @@ require_once __DIR__ . '/includes/header.php';
         <div class="target-line"><?php echo htmlspecialchars(ui_text($ui, 'top_platform')); ?> <?php echo htmlspecialchars($topPlatform['shopName'] ?? '-'); ?> | <?php echo htmlspecialchars(ui_text($ui, 'top_sku')); ?> <?php echo htmlspecialchars($topProduct['sku'] ?? '-'); ?></div>
     </div>
 </div>
+</div>
 
+<div class="dash-section" data-section-id="performance-diagnosis" data-section-label-th="วิเคราะห์ผลการดำเนินงาน" data-section-label-en="Performance Diagnosis">
 <div class="section-title">
     <h2><?php echo htmlspecialchars(ui_text($ui, 'performance_diagnosis')); ?></h2>
     <span><?php echo htmlspecialchars(ui_text($ui, 'manager_review')); ?></span>
@@ -1177,7 +1161,9 @@ require_once __DIR__ . '/includes/header.php';
         <div class="chart-box"><canvas id="platformShareChart"></canvas></div>
     </div>
 </div>
+</div>
 
+<div class="dash-section" data-section-id="product-mix-grid" data-section-label-th="สัดส่วนสินค้าและสถานะคำสั่งซื้อ" data-section-label-en="Product Mix & Order Status">
 <div class="analysis-grid">
     <div class="chart-card">
         <h3><?php echo htmlspecialchars(ui_text($ui, 'product_mix')); ?></h3>
@@ -1199,7 +1185,9 @@ require_once __DIR__ . '/includes/header.php';
         <div class="chart-box small"><canvas id="weekdayOrdersChart"></canvas></div>
     </div>
 </div>
+</div>
 
+<div class="dash-section" data-section-id="platform-top-products-tables" data-section-label-th="ตารางแพลตฟอร์มและสินค้าขายดี" data-section-label-en="Platform & Top Products Tables">
 <div class="split-grid max-[900px]:grid-cols-1">
     <div class="table-card">
         <h3><?php echo htmlspecialchars(ui_text($ui, 'platform_performance')); ?></h3>
@@ -1258,7 +1246,9 @@ require_once __DIR__ . '/includes/header.php';
         </table></div>
     </div>
 </div>
+</div>
 
+<div class="dash-section" data-section-id="daily-control" data-section-label-th="ควบคุมงานรายวัน" data-section-label-en="Daily Control">
 <div class="section-title">
     <h2><?php echo htmlspecialchars(ui_text($ui, 'daily_control')); ?></h2>
     <span><?php echo htmlspecialchars(ui_text($ui, 'operator_followup')); ?></span>
@@ -1362,7 +1352,9 @@ require_once __DIR__ . '/includes/header.php';
         <?php endif; ?>
     </div>
 </div>
+</div>
 
+<div class="dash-section" data-section-id="discount-anomaly" data-section-label-th="ความผิดปกติของส่วนลด" data-section-label-en="Discount Anomaly">
 <div class="table-card" style="margin-bottom: 24px;">
     <h3><?php echo htmlspecialchars(ui_text($ui, 'disc_anomaly_title')); ?><?php echo hint_icon(ui_text($ui, 'tooltip_disc_anomaly')); ?></h3>
     <div class="table-note"><?php echo htmlspecialchars(ui_text($ui, 'disc_anomaly_subtitle')); ?> · <?php echo htmlspecialchars($latestCompleteDate->format('j M Y')); ?></div>
@@ -1398,9 +1390,12 @@ require_once __DIR__ . '/includes/header.php';
     <h3><?php echo htmlspecialchars(ui_text($ui, 'discount_tier_trend')); ?><?php echo hint_icon(ui_text($ui, 'tooltip_discount_tier_trend')); ?></h3>
     <div class="chart-box"><canvas id="discountTierTrendChart"></canvas></div>
 </div>
+</div>
 
 <script>
-const chartColors = ['#c9a227', '#1a1a2e', '#10B981', '#3B82F6', '#EF4444', '#F59E0B', '#6B7280'];
+// Fixed brand-derived categorical order (validated colorblind-safe) — see BRAND_COLORS.md.
+// Same order used on every dashboard's multi-category charts, never reordered per chart.
+const chartColors = ['#4b74d8', '#8e792a', '#09899e', '#9b59bc', '#12933f', '#c55123', '#bf497e'];
 const numberFormat = new Intl.NumberFormat('<?php echo $uiLanguage === 'th' ? 'th-TH' : 'en-US'; ?>');
 
 // Count-up animation for hero + KPI card values on page load
@@ -1442,7 +1437,7 @@ new Chart(document.getElementById('dailySalesChart'), {
             {
                 label: <?php echo json_encode(ui_text($ui, 'chart_net_sales')); ?>,
                 data: <?php echo json_encode(array_map('n', array_column($dailyTrend, 'netSales'))); ?>,
-                backgroundColor: '#c9a227',
+                backgroundColor: '#dab937',
                 borderWidth: 0,
                 borderRadius: 4
             },
@@ -1581,7 +1576,7 @@ new Chart(document.getElementById('peakHoursChart'), {
         datasets: [{
             label: <?php echo json_encode(ui_text($ui, 'orders')); ?>,
             data: <?php echo json_encode(array_values($peakHoursByHour)); ?>,
-            backgroundColor: '#c9a227',
+            backgroundColor: '#dab937',
             borderWidth: 0,
             borderRadius: 4
         }]
@@ -1607,7 +1602,7 @@ new Chart(document.getElementById('weekdayOrdersChart'), {
         datasets: [{
             label: <?php echo json_encode(ui_text($ui, 'orders')); ?>,
             data: <?php echo json_encode(array_values($weekdayOrdersByDow)); ?>,
-            backgroundColor: '#1a1a2e',
+            backgroundColor: '#091113',
             borderWidth: 0,
             borderRadius: 4
         }]

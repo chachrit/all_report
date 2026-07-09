@@ -5,7 +5,8 @@ $connectionOptions = [
     "Database" => "all_report",
     "Uid" => "sa",
     "PWD" => "Journal@25",
-    "CharacterSet" => "UTF-8"
+    "CharacterSet" => "UTF-8",
+    "LoginTimeout" => 15
 ];
 
 $conn = sqlsrv_connect($serverName, $connectionOptions);

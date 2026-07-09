@@ -820,7 +820,7 @@ if ($filterValues['zone'] !== 'all') {
 
 $pageTitle = ui_text($ui, 'page_title');
 $pageSubtitle = ui_text($ui, 'page_subtitle');
-$accentColor = '#1a1a2e';
+$accentColor = '#4f8b98'; // Journal brand Teal (7711C) — see BRAND_COLORS.md
 require_once __DIR__ . '/includes/header.php';
 ?>
 
@@ -828,32 +828,13 @@ require_once __DIR__ . '/includes/header.php';
     .offline-hero {
         position: relative;
         overflow: hidden;
-        isolation: isolate;
-        background:
-            radial-gradient(circle at 105% -10%, rgba(122,139,255,0.25) 0%, rgba(122,139,255,0) 42%),
-            radial-gradient(circle at -5% 115%, rgba(58,79,140,0.30) 0%, rgba(58,79,140,0) 48%),
-            linear-gradient(160deg, #101322 0%, #1a1a2e 100%);
+        background: #091113;
+        border-left: 4px solid var(--accent);
         color: #fff;
         padding: 34px 36px;
         border-radius: 12px;
         margin-bottom: 28px;
         box-shadow: 0 10px 28px rgba(12,18,32,0.28);
-    }
-    .offline-hero::before {
-        content: '';
-        position: absolute; inset: 0;
-        background-image: radial-gradient(rgba(255,255,255,0.06) 1px, transparent 1px);
-        background-size: 16px 16px;
-        -webkit-mask-image: linear-gradient(160deg, rgba(0,0,0,0.9), rgba(0,0,0,0) 70%);
-        mask-image: linear-gradient(160deg, rgba(0,0,0,0.9), rgba(0,0,0,0) 70%);
-        z-index: 0;
-    }
-    .offline-hero::after {
-        content: '';
-        position: absolute; right: -34px; bottom: -34px; width: 200px; height: 200px;
-        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%237a8bff' stroke-width='1'%3E%3Cpath d='M3 21h18M5 21V10l4-4 4 4 4-4v15'/%3E%3C/svg%3E");
-        background-repeat: no-repeat; background-size: contain;
-        opacity: 0.1; z-index: 0; pointer-events: none;
     }
     .offline-hero-top { position: relative; z-index: 1; display: flex; justify-content: space-between; gap: 28px; align-items: flex-start; }
     .no-data-banner { background: #fff; border: 1px solid #E5E7EB; border-radius: 8px; padding: 18px 20px; margin-bottom: 24px; display: flex; align-items: center; gap: 14px; }
@@ -938,12 +919,12 @@ require_once __DIR__ . '/includes/header.php';
     .info-tip .tip-icon { width: 15px; height: 15px; border-radius: 50%; background: #E5E7EB; color: #6B7280; font-size: 10px; font-weight: 700; display: flex; align-items: center; justify-content: center; cursor: help; }
     .info-tip .tip-box {
         position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%) translateY(-8px);
-        background: #1a1a2e; color: #fff; padding: 8px 12px; border-radius: 6px; font-size: 11px;
+        background: #091113; color: #fff; padding: 8px 12px; border-radius: 6px; font-size: 11px;
         line-height: 1.4; font-weight: 400; text-transform: none; letter-spacing: normal;
         white-space: normal; width: 240px; opacity: 0; visibility: hidden;
         transition: opacity 0.15s ease, visibility 0.15s ease; z-index: 1000; pointer-events: none;
     }
-    .info-tip .tip-box::after { content: ''; position: absolute; top: 100%; left: 50%; transform: translateX(-50%); border: 6px solid transparent; border-top-color: #1a1a2e; }
+    .info-tip .tip-box::after { content: ''; position: absolute; top: 100%; left: 50%; transform: translateX(-50%); border: 6px solid transparent; border-top-color: #091113; }
     .info-tip:hover .tip-box { opacity: 1; visibility: visible; }
     @media (max-width: 1100px) {
         .metric-grid, .ops-grid { grid-template-columns: repeat(2, 1fr); }
@@ -957,6 +938,7 @@ require_once __DIR__ . '/includes/header.php';
     }
 </style>
 
+<div class="dash-section" data-section-id="kpi-cards" data-section-label-th="ตัวเลข KPI หลัก" data-section-label-en="Headline KPIs">
 <div class="offline-hero">
     <div class="offline-hero-top">
         <div>
@@ -1032,7 +1014,9 @@ require_once __DIR__ . '/includes/header.php';
         <div class="target-line"><?php echo htmlspecialchars(ui_text($ui, 'top_branch')); ?> <?php echo htmlspecialchars($topBranch['BranchName'] ?? '-'); ?> | <?php echo htmlspecialchars(ui_text($ui, 'top_product')); ?> <?php echo htmlspecialchars($topProduct['ProductName'] ?? '-'); ?></div>
     </div>
 </div>
+</div>
 
+<div class="dash-section" data-section-id="monthly-trend" data-section-label-th="แนวโน้มยอดขายรายเดือน" data-section-label-en="Monthly Sales Trend">
 <div class="section-title">
     <h2><?php echo htmlspecialchars(ui_text($ui, 'monthly_trend_chart')); ?></h2>
     <span><?php echo htmlspecialchars($monthlyTrendSummaryText); ?></span>
@@ -1040,7 +1024,9 @@ require_once __DIR__ . '/includes/header.php';
 <div class="chart-card" style="margin-bottom: 24px;">
     <div class="chart-box"><canvas id="monthlyTrendChart"></canvas></div>
 </div>
+</div>
 
+<div class="dash-section" data-section-id="performance-diagnosis" data-section-label-th="วิเคราะห์ผลการดำเนินงาน" data-section-label-en="Performance Diagnosis">
 <div class="section-title">
     <h2><?php echo htmlspecialchars(ui_text($ui, 'performance_diagnosis')); ?></h2>
     <span><?php echo htmlspecialchars(ui_text($ui, 'manager_review')); ?></span>
@@ -1055,7 +1041,9 @@ require_once __DIR__ . '/includes/header.php';
         <div class="chart-box"><canvas id="branchShareChart"></canvas></div>
     </div>
 </div>
+</div>
 
+<div class="dash-section" data-section-id="zone-product-discount-mix" data-section-label-th="สัดส่วนโซน สินค้า และส่วนลด" data-section-label-en="Zone, Product & Discount Mix">
 <div class="three-grid">
     <div class="chart-card">
         <h3><?php echo htmlspecialchars(ui_text($ui, 'zone_mix')); ?> <span class="hint">(<?php echo htmlspecialchars(ui_text($ui, 'chart_click_hint')); ?>)</span></h3>
@@ -1070,7 +1058,9 @@ require_once __DIR__ . '/includes/header.php';
         <div class="chart-box small"><canvas id="discountChart"></canvas></div>
     </div>
 </div>
+</div>
 
+<div class="dash-section" data-section-id="branch-products-tables" data-section-label-th="ตารางสาขาและสินค้าขายดี" data-section-label-en="Branch & Top Products Tables">
 <div class="split-grid max-[900px]:grid-cols-1">
     <div class="table-card">
         <h3><?php echo htmlspecialchars(ui_text($ui, 'branch_performance')); ?> <span class="hint">(<?php echo htmlspecialchars(ui_text($ui, 'chart_click_hint')); ?>)</span></h3>
@@ -1136,7 +1126,9 @@ require_once __DIR__ . '/includes/header.php';
         </details>
     </div>
 </div>
+</div>
 
+<div class="dash-section" data-section-id="daily-control" data-section-label-th="ควบคุมงานรายวัน" data-section-label-en="Daily Control">
 <div class="section-title">
     <h2><?php echo htmlspecialchars(ui_text($ui, 'daily_control')); ?><?php echo info_tip($ui, 'tip_daily_control'); ?></h2>
     <span><?php echo htmlspecialchars(ui_text($ui, 'operator_followup')); ?></span>
@@ -1241,7 +1233,9 @@ require_once __DIR__ . '/includes/header.php';
         <?php endif; ?>
     </div>
 </div>
+</div>
 
+<div class="dash-section" data-section-id="discount-anomaly-heatmap" data-section-label-th="ส่วนลดผิดปกติและ Heatmap" data-section-label-en="Discount Anomaly & Heatmap">
 <div class="table-card" style="margin-bottom: 24px;">
     <h3><?php echo htmlspecialchars(ui_text($ui, 'disc_anomaly_title')); ?><?php echo info_tip($ui, 'tip_disc_anomaly'); ?></h3>
     <div class="table-note"><?php echo htmlspecialchars(ui_text($ui, 'disc_anomaly_subtitle')); ?> · <?php echo htmlspecialchars($maxDate->format('j M Y')); ?></div>
@@ -1306,9 +1300,12 @@ require_once __DIR__ . '/includes/header.php';
         </table></div>
     </div>
 </div>
+</div>
 
 <script>
-const chartColors = ['#1a1a2e', '#c9a227', '#10B981', '#3B82F6', '#EF4444', '#F59E0B', '#6B7280'];
+// Fixed brand-derived categorical order (validated colorblind-safe) — see BRAND_COLORS.md.
+// Same order used on every dashboard's multi-category charts, never reordered per chart.
+const chartColors = ['#4b74d8', '#8e792a', '#09899e', '#9b59bc', '#12933f', '#c55123', '#bf497e'];
 const numberFormat = new Intl.NumberFormat('<?php echo $uiLanguage === 'th' ? 'th-TH' : 'en-US'; ?>');
 
 // Count-up animation for hero + KPI card values on page load
@@ -1388,7 +1385,7 @@ new Chart(document.getElementById('dailySalesChart'), {
             {
                 label: <?php echo json_encode(ui_text($ui, 'net_sales')); ?>,
                 data: <?php echo json_encode(array_map('n', array_column($dailyTrend, 'netSales'))); ?>,
-                backgroundColor: '#1a1a2e',
+                backgroundColor: '#4f8b98',
                 borderWidth: 0,
                 borderRadius: 4
             },
@@ -1424,8 +1421,8 @@ new Chart(document.getElementById('monthlyTrendChart'), {
             {
                 label: <?php echo json_encode(ui_text($ui, 'this_period')); ?>,
                 data: <?php echo json_encode(array_map('round', $monthlyTrendCurrent)); ?>,
-                borderColor: '#1a1a2e',
-                backgroundColor: '#1a1a2e',
+                borderColor: '#4f8b98',
+                backgroundColor: '#4f8b98',
                 borderWidth: 2,
                 pointRadius: 3,
                 tension: 0.3
@@ -1502,7 +1499,7 @@ const zoneChart = new Chart(document.getElementById('zoneChart'), {
         datasets: [{
             label: <?php echo json_encode(ui_text($ui, 'net_sales')); ?>,
             data: <?php echo json_encode(array_map('n', array_column($zoneMix, 'netSales'))); ?>,
-            backgroundColor: '#1a1a2e',
+            backgroundColor: '#4f8b98',
             borderWidth: 0,
             borderRadius: 4
         }]
@@ -1596,7 +1593,7 @@ const branchPerfChart = new Chart(document.getElementById('branchPerfChart'), {
         datasets: [{
             label: <?php echo json_encode(ui_text($ui, 'net_sales')); ?>,
             data: <?php echo json_encode(array_map('n', array_column($branchChartTop, 'netSales'))); ?>,
-            backgroundColor: '#1a1a2e',
+            backgroundColor: '#4f8b98',
             borderWidth: 0,
             borderRadius: 4
         }]
@@ -1637,7 +1634,7 @@ const topProductsChart = new Chart(document.getElementById('topProductsChart'), 
         datasets: [{
             label: <?php echo json_encode(ui_text($ui, 'net_sales')); ?>,
             data: topProductsChartRows.map(p => Number(p.netSales) || 0),
-            backgroundColor: '#1a1a2e',
+            backgroundColor: '#4f8b98',
             borderWidth: 0,
             borderRadius: 4
         }]

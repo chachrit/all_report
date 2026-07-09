@@ -65,6 +65,7 @@ function request_value(string $key, string $default, array $allowed): string
 // respect it, instead of always showing a hardcoded current month.
 $filterValues = [
     'date_range' => request_value('date_range', 'mtd', ['today', 'mtd', 'ytd']),
+    'channel' => request_value('channel', 'all', ['all', 'online', 'offline']),
 ];
 
 /**
@@ -113,8 +114,9 @@ $onlineYearStart = new DateTime($onlineMaxDate->format('Y-01-01'));
 /**
  * The KPI cards/platform/branch/top-product sections below all use this
  * date_range-driven window (today/mtd/ytd), same three options as the Online/Offline
- * dashboards. Trend charts and the Annual Goal card intentionally stay unaffected —
- * see their own comments below.
+ * dashboards. The Monthly Revenue Trend chart's window also follows date_range (see
+ * $trendMonthsBack below) and its channel breakdown follows the channel filter. The
+ * Annual Goal card intentionally stays unaffected — see its own comment below.
  */
 if ($filterValues['date_range'] === 'today') {
     $onlinePeriodStart = clone $onlineMaxDate;
@@ -276,8 +278,11 @@ if (!empty($onlineTopProductKeys)) {
     }
 }
 
-// Last 12 real months, by platform (for the Monthly Trend chart's channel breakdown)
-$trendMonthsBack = 11;
+// Monthly Trend chart's window: YTD narrows to Jan..current month; Today/MTD keep the
+// trailing-12-months view (a single day/month has no meaningful "monthly" trend).
+$trendMonthsBack = ($filterValues['date_range'] === 'ytd')
+    ? max(0, (int) $onlineMtdStart->format('n') - 1)
+    : 11;
 $onlineTrendStart = (clone $onlineMtdStart)->modify("-{$trendMonthsBack} months");
 $onlineTrendRows = fetch_all($conn, "
     WITH " . ONLINE_ITEM_AGG_CTE . "
@@ -606,11 +611,135 @@ $mockData = [
 
     'monthlyTrend' => $monthlyTrend
 ];
+
+// ---------------------------------------------------------------------------
+// Total Sales Trend (Online + Offline + Consignment est.), current vs previous
+// period — granularity follows date_range: hourly for Today, daily (day-of-month)
+// for MTD, monthly for YTD. FactSales has no time-of-day column, so Offline's
+// Today view spreads its daily total evenly across hours (an estimate, not real
+// intraday data). Consignment has no real time series at all, so it's spread as
+// the same flat run-rate in every bucket of both lines (see mock comments above).
+// ---------------------------------------------------------------------------
+$totalTrendGranularity = match ($filterValues['date_range']) {
+    'today' => 'hour',
+    'ytd' => 'month',
+    default => 'day', // mtd
+};
+$totalTrendLabels = [];
+$totalTrendCurrent = [];
+$totalTrendPrevious = [];
+
+if ($totalTrendGranularity === 'hour') {
+    $onlineHourRows = fetch_all($conn, "
+        WITH " . ONLINE_ITEM_AGG_CTE . "
+        SELECT DATEPART(HOUR, o.order_datetime) AS bucket, SUM(ia.netSales) AS netSales
+        FROM fact_online_orders o JOIN item_agg ia ON ia.order_key = o.order_key
+        WHERE o.order_datetime >= ? AND o.order_datetime < ?" . ONLINE_VALID_SALES_SQL . "
+        GROUP BY DATEPART(HOUR, o.order_datetime);
+    ", [$onlinePeriodStart->format('Y-m-d H:i:s'), $onlinePeriodEnd->format('Y-m-d H:i:s')]);
+    $onlinePrevHourRows = fetch_all($conn, "
+        WITH " . ONLINE_ITEM_AGG_CTE . "
+        SELECT DATEPART(HOUR, o.order_datetime) AS bucket, SUM(ia.netSales) AS netSales
+        FROM fact_online_orders o JOIN item_agg ia ON ia.order_key = o.order_key
+        WHERE o.order_datetime >= ? AND o.order_datetime < ?" . ONLINE_VALID_SALES_SQL . "
+        GROUP BY DATEPART(HOUR, o.order_datetime);
+    ", [$onlineTargetStart->format('Y-m-d H:i:s'), $onlineTargetEnd->format('Y-m-d H:i:s')]);
+
+    $onlineByHour = array_fill(0, 24, 0.0);
+    foreach ($onlineHourRows as $row) { $onlineByHour[(int) $row['bucket']] = n($row['netSales']); }
+    $onlinePrevByHour = array_fill(0, 24, 0.0);
+    foreach ($onlinePrevHourRows as $row) { $onlinePrevByHour[(int) $row['bucket']] = n($row['netSales']); }
+
+    $offlineFlatPerHour = $offlineNetSales / 24;
+    $offlinePrevFlatPerHour = $offlinePrevNetSales / 24;
+    $consignmentFlatPerHour = $consignmentPeriodEstimate / 24;
+
+    for ($h = 0; $h < 24; $h++) {
+        $totalTrendLabels[] = sprintf('%02d:00', $h);
+        $totalTrendCurrent[] = round($onlineByHour[$h] + $offlineFlatPerHour + $consignmentFlatPerHour);
+        $totalTrendPrevious[] = round($onlinePrevByHour[$h] + $offlinePrevFlatPerHour + $consignmentFlatPerHour);
+    }
+} elseif ($totalTrendGranularity === 'day') {
+    // Days elapsed this month, per the real online data's latest date — both lines
+    // show the same number of day-of-month buckets so they compare like-for-like.
+    $daysInPeriod = max(1, (int) $onlineMaxDate->format('j'));
+    $consignmentFlatPerDay = $consignmentMonthlyFlat / 30;
+
+    $onlineDayRows = fetch_all($conn, "
+        WITH " . ONLINE_ITEM_AGG_CTE . "
+        SELECT DAY(o.order_datetime) AS bucket, SUM(ia.netSales) AS netSales
+        FROM fact_online_orders o JOIN item_agg ia ON ia.order_key = o.order_key
+        WHERE o.order_datetime >= ? AND o.order_datetime < ?" . ONLINE_VALID_SALES_SQL . "
+        GROUP BY DAY(o.order_datetime);
+    ", [$onlinePeriodStart->format('Y-m-d'), $onlinePeriodEnd->format('Y-m-d')]);
+    $onlinePrevDayRows = fetch_all($conn, "
+        WITH " . ONLINE_ITEM_AGG_CTE . "
+        SELECT DAY(o.order_datetime) AS bucket, SUM(ia.netSales) AS netSales
+        FROM fact_online_orders o JOIN item_agg ia ON ia.order_key = o.order_key
+        WHERE o.order_datetime >= ? AND o.order_datetime < ?" . ONLINE_VALID_SALES_SQL . "
+        GROUP BY DAY(o.order_datetime);
+    ", [$onlineTargetStart->format('Y-m-d'), $onlineTargetEnd->format('Y-m-d')]);
+    $offlineDayRows = fetch_all($conn, "
+        SELECT (f.DateKey % 100) AS bucket, SUM(f.NetTotal) AS netSales
+        FROM FactSales f JOIN DimBranch b ON f.BranchKey = b.BranchKey JOIN DimProduct p ON f.ProductKey = p.ProductKey
+        WHERE f.DateKey >= ? AND f.DateKey < ? AND " . RETAIL_BRANCH_SQL . " AND " . SELLABLE_PRODUCT_SQL . "
+        GROUP BY (f.DateKey % 100);
+    ", [$offlinePeriodStartKey, $offlinePeriodEndKey]);
+    $offlinePrevDayRows = fetch_all($conn, "
+        SELECT (f.DateKey % 100) AS bucket, SUM(f.NetTotal) AS netSales
+        FROM FactSales f JOIN DimBranch b ON f.BranchKey = b.BranchKey JOIN DimProduct p ON f.ProductKey = p.ProductKey
+        WHERE f.DateKey >= ? AND f.DateKey < ? AND " . RETAIL_BRANCH_SQL . " AND " . SELLABLE_PRODUCT_SQL . "
+        GROUP BY (f.DateKey % 100);
+    ", [$offlineTargetStartKey, $offlineTargetEndKey]);
+
+    $onlineByDay = array_fill(1, 31, 0.0);
+    foreach ($onlineDayRows as $row) { $onlineByDay[(int) $row['bucket']] = n($row['netSales']); }
+    $onlinePrevByDay = array_fill(1, 31, 0.0);
+    foreach ($onlinePrevDayRows as $row) { $onlinePrevByDay[(int) $row['bucket']] = n($row['netSales']); }
+    $offlineByDay = array_fill(1, 31, 0.0);
+    foreach ($offlineDayRows as $row) { $offlineByDay[(int) $row['bucket']] = n($row['netSales']); }
+    $offlinePrevByDay = array_fill(1, 31, 0.0);
+    foreach ($offlinePrevDayRows as $row) { $offlinePrevByDay[(int) $row['bucket']] = n($row['netSales']); }
+
+    for ($d = 1; $d <= $daysInPeriod; $d++) {
+        $totalTrendLabels[] = (string) $d;
+        $totalTrendCurrent[] = round($onlineByDay[$d] + $offlineByDay[$d] + $consignmentFlatPerDay);
+        $totalTrendPrevious[] = round($onlinePrevByDay[$d] + $offlinePrevByDay[$d] + $consignmentFlatPerDay);
+    }
+} else { // month (ytd) — reuse $monthlyTrend (already Jan..current month) for "current";
+    // query the same Jan..current-month window one year back for "previous".
+    $onlineMonthRows = fetch_all($conn, "
+        WITH " . ONLINE_ITEM_AGG_CTE . "
+        SELECT MONTH(o.order_datetime) AS bucket, SUM(ia.netSales) AS netSales
+        FROM fact_online_orders o JOIN item_agg ia ON ia.order_key = o.order_key
+        WHERE o.order_datetime >= ? AND o.order_datetime < ?" . ONLINE_VALID_SALES_SQL . "
+        GROUP BY MONTH(o.order_datetime);
+    ", [$onlineTargetStart->format('Y-m-d'), $onlineTargetEnd->format('Y-m-d')]);
+    $offlineMonthRows = fetch_all($conn, "
+        SELECT ((f.DateKey / 100) % 100) AS bucket, SUM(f.NetTotal) AS netSales
+        FROM FactSales f JOIN DimBranch b ON f.BranchKey = b.BranchKey JOIN DimProduct p ON f.ProductKey = p.ProductKey
+        WHERE f.DateKey >= ? AND f.DateKey < ? AND " . RETAIL_BRANCH_SQL . " AND " . SELLABLE_PRODUCT_SQL . "
+        GROUP BY ((f.DateKey / 100) % 100);
+    ", [$offlineTargetStartKey, $offlineTargetEndKey]);
+
+    $onlinePrevByMonth = array_fill(1, 12, 0.0);
+    foreach ($onlineMonthRows as $row) { $onlinePrevByMonth[(int) $row['bucket']] = n($row['netSales']); }
+    $offlinePrevByMonth = array_fill(1, 12, 0.0);
+    foreach ($offlineMonthRows as $row) { $offlinePrevByMonth[(int) $row['bucket']] = n($row['netSales']); }
+
+    foreach ($monthlyTrend as $index => $monthEntry) {
+        $monthNumber = $index + 1; // $monthlyTrend is Jan..current when date_range=ytd
+        $totalTrendLabels[] = $monthEntry['month'];
+        $totalTrendCurrent[] = round($monthEntry['online'] + $monthEntry['offline'] + $monthEntry['consignment']);
+        $totalTrendPrevious[] = round($onlinePrevByMonth[$monthNumber] + $offlinePrevByMonth[$monthNumber] + $monthEntry['consignment']);
+    }
+}
+
 // Sales channel breakdown for donut chart
 $salesChannelBreakdown = [
-    ['name'=>'Online','revenue'=>$mockData['totalSales']['online'],'percent'=>round($mockData['totalSales']['online']/$mockData['totalSales']['total']*100,1),'color'=>'#c9a227'],
-    ['name'=>'Offline','revenue'=>$mockData['totalSales']['offline'],'percent'=>round($mockData['totalSales']['offline']/$mockData['totalSales']['total']*100,1),'color'=>'#1a1a2e'],
-    ['name'=>'Consignment (est.)','revenue'=>$mockData['totalSales']['consignment'],'percent'=>round($mockData['totalSales']['consignment']/$mockData['totalSales']['total']*100,1),'color'=>'#e67e22']
+    ['name'=>'Online','revenue'=>$mockData['totalSales']['online'],'percent'=>round($mockData['totalSales']['online']/$mockData['totalSales']['total']*100,1),'color'=>'#dab937'],
+    ['name'=>'Offline','revenue'=>$mockData['totalSales']['offline'],'percent'=>round($mockData['totalSales']['offline']/$mockData['totalSales']['total']*100,1),'color'=>'#4f8b98'],
+    ['name'=>'Consignment (est.)','revenue'=>$mockData['totalSales']['consignment'],'percent'=>round($mockData['totalSales']['consignment']/$mockData['totalSales']['total']*100,1),'color'=>'#62307a']
 ];
 
 // Top online platforms
@@ -626,7 +755,7 @@ $topOfflineConsignment = array_slice($topOfflineConsignment, 0, 5);
 // ----- ตัวแปรสำหรับ header.php -----
 $pageTitle    = 'Executive Dashboard';
 $pageSubtitle = 'Journal Sales Performance Overview';
-$accentColor  = '#c9a227';
+$accentColor  = '#2f4e9d';
 require_once __DIR__ . '/includes/header.php';
 
 // หาค่าสูงสุดจากข้อมูลจริง (รวมทั้ง online และ offline) แทนตัวหาร hardcode เดิม
@@ -646,7 +775,8 @@ $maxTrendValue = max(array_merge(
     }
     .annual-goal-left {
         flex: 0 0 390px;
-        background: linear-gradient(160deg, #0E1B2E 0%, #1F334F 100%);
+        background: #091113;
+        border-left: 4px solid var(--accent);
         color: #fff;
         padding: 28px 26px;
         display: flex;
@@ -677,7 +807,7 @@ $maxTrendValue = max(array_merge(
     .annual-goal-donut-wrap { position: relative; width: 148px; height: 148px; margin: 6px 0; }
     .annual-goal-donut { width: 100%; height: 100%; }
     .annual-goal-donut .track { stroke: rgba(255,255,255,0.14); }
-    .annual-goal-donut .progress { stroke: #C9A227; stroke-linecap: round; transition: stroke-dashoffset 0.6s ease; }
+    .annual-goal-donut .progress { stroke: #2f4e9d; stroke-linecap: round; transition: stroke-dashoffset 0.6s ease; }
     .annual-goal-donut-center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
     .annual-goal-donut-center .pct { font-size: 26px; font-weight: 300; color: #fff; font-variant-numeric: tabular-nums; }
     .annual-goal-donut-center .pct-label { font-size: 10px; color: rgba(255,255,255,0.6); text-transform: uppercase; letter-spacing: 0.05em; margin-top: 2px; }
@@ -741,6 +871,7 @@ $donutR = 60;
 $donutCircumference = 2 * M_PI * $donutR;
 $donutOffset = $donutCircumference * (1 - max(0, min(100, $ytdPct)) / 100);
 ?>
+        <div class="dash-section" data-section-id="annual-goal" data-section-label-th="เป้าหมายรายปี" data-section-label-en="Annual Goal Tracking">
         <div class="annual-goal-card">
             <div class="annual-goal-left">
                 <div class="annual-goal-headline">
@@ -801,21 +932,23 @@ $donutOffset = $donutCircumference * (1 - max(0, min(100, $ytdPct)) / 100);
                         <span><?php echo number_format(min(100, $achievement), 0); ?>%</span>
                     </div>
                     <div class="annual-goal-progress-track">
-                        <div class="annual-goal-progress-fill" style="width: <?php echo max(0, min(100, $achievement)); ?>%; background: <?php echo $achievement >= 100 ? '#4E7D57' : '#C9A227'; ?>;"></div>
+                        <div class="annual-goal-progress-fill" style="width: <?php echo max(0, min(100, $achievement)); ?>%; background: <?php echo $achievement >= 100 ? '#4E7D57' : '#EF4444'; ?>;"></div>
                     </div>
                 </div>
             </div>
         </div>
+        </div>
 
         <!-- Monthly Target Progress -->
+        <div class="dash-section" data-section-id="monthly-target-progress" data-section-label-th="ความคืบหน้าเป้าหมายรายเดือน" data-section-label-en="Monthly Target Progress">
         <div class="chart-card">
             <h3 style="margin-bottom: 20px;">Monthly Target Progress</h3>
             <div style="display: flex; flex-direction: column; gap: 20px;">
                 <?php
                 $channels = [
-                    ['name' => 'Online', 'current' => $mockData['monthlyActual']['online'], 'target' => $mockData['monthlyTargets']['online'], 'color' => '#c9a227', 'isEstimate' => false],
-                    ['name' => 'Offline', 'current' => $mockData['monthlyActual']['offline'], 'target' => $mockData['monthlyTargets']['offline'], 'color' => '#1a1a2e', 'isEstimate' => false],
-                    ['name' => 'Consignment', 'current' => $mockData['monthlyActual']['consignment'], 'target' => $mockData['monthlyTargets']['consignment'], 'color' => '#e67e22', 'isEstimate' => true],
+                    ['name' => 'Online', 'current' => $mockData['monthlyActual']['online'], 'target' => $mockData['monthlyTargets']['online'], 'color' => '#dab937', 'isEstimate' => false],
+                    ['name' => 'Offline', 'current' => $mockData['monthlyActual']['offline'], 'target' => $mockData['monthlyTargets']['offline'], 'color' => '#4f8b98', 'isEstimate' => false],
+                    ['name' => 'Consignment', 'current' => $mockData['monthlyActual']['consignment'], 'target' => $mockData['monthlyTargets']['consignment'], 'color' => '#62307a', 'isEstimate' => true],
                 ];
                 foreach ($channels as $channel):
                     $progress = min(100, ($channel['current'] / $channel['target']) * 100);
@@ -850,7 +983,8 @@ $donutOffset = $donutCircumference * (1 - max(0, min(100, $ytdPct)) / 100);
                 <?php endforeach; ?>
             </div>
         </div>
-<!-- 
+        </div>
+<!--
     <div class="table-card">
     <h3>Executive Alerts</h3>
     <?php //foreach($mockData['alerts'] as $alert): ?>
@@ -881,6 +1015,7 @@ $donutOffset = $donutCircumference * (1 - max(0, min(100, $ytdPct)) / 100);
 </div> -->
 
         <!-- KPI Cards -->
+<div class="dash-section" data-section-id="kpi-cards" data-section-label-th="การ์ด KPI" data-section-label-en="KPI Cards">
 <div class="kpi-grid">
 
     <div class="kpi-card" onclick="scrollToSection('channel-contribution')">
@@ -920,14 +1055,37 @@ $donutOffset = $donutCircumference * (1 - max(0, min(100, $ytdPct)) / 100);
     </div>
 
 </div>
+</div>
+
+        <!-- Total Sales Trend: current vs previous period, granularity follows date_range -->
+        <div class="dash-section" data-section-id="total-sales-trend" data-section-label-th="แนวโน้มยอดขายรวม" data-section-label-en="Total Sales Trend">
+        <div class="chart-card">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                <h3 style="margin: 0;">
+                    <?php
+                    $totalTrendSubtitle = match ($filterValues['date_range']) {
+                        'today' => 'วันนี้',
+                        'ytd' => 'ปีนี้',
+                        default => 'เดือนนี้',
+                    };
+                    echo 'แนวโน้มยอดขาย · ' . htmlspecialchars($totalTrendSubtitle);
+                    ?>
+                </h3>
+            </div>
+            <div style="padding: 15px 0 0;">
+                <canvas id="totalSalesTrendChart" style="max-height: 260px;"></canvas>
+            </div>
+        </div>
+        </div>
 
         <!-- Row 1: Overview Trends and Channels -->
+        <div class="dash-section" data-section-id="revenue-trend-channel-mix" data-section-label-th="แนวโน้มรายได้และสัดส่วนช่องทาง" data-section-label-en="Revenue Trend & Channel Mix">
         <div class="row1-grid">
             <!-- Monthly Revenue Trend (60%) -->
             <div class="chart-card">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
                     <h3 style="margin: 0;">Monthly Revenue Trend</h3>
-                    <a href="#" style="font-size: 11px; color: #c9a227; text-decoration: none; font-weight: 500;">View Details →</a>
+                    <a href="#" style="font-size: 11px; color: #2f4e9d; text-decoration: none; font-weight: 500;">View Details →</a>
                 </div>
                 <div style="padding: 20px 0;">
                     <canvas id="monthlyRevenueChart"></canvas>
@@ -973,7 +1131,7 @@ $donutOffset = $donutCircumference * (1 - max(0, min(100, $ytdPct)) / 100);
                             <tr>
                                 <td style="padding: 8px 0; border-bottom: 1px solid #f5f5f5;">
                                     <div style="display: flex; align-items: center; gap: 8px;">
-                                        <span style="display: inline-block; width: 20px; height: 20px; line-height: 20px; text-align: center; border-radius: 50%; background: #c9a227; color: white; font-size: 10px; font-weight: 600;"><?php echo $index + 1; ?></span>
+                                        <span style="display: inline-block; width: 20px; height: 20px; line-height: 20px; text-align: center; border-radius: 50%; background: #dab937; color: white; font-size: 10px; font-weight: 600;"><?php echo $index + 1; ?></span>
                                         <span style="font-size: 12px; color: #111827; font-weight: 500;"><?php echo htmlspecialchars($platform['name']); ?></span>
                                     </div>
                                 </td>
@@ -993,7 +1151,7 @@ $donutOffset = $donutCircumference * (1 - max(0, min(100, $ytdPct)) / 100);
                             <tr>
                                 <td style="padding: 8px 0; border-bottom: 1px solid #f5f5f5;">
                                     <div style="display: flex; align-items: center; gap: 8px;">
-                                        <span style="display: inline-block; width: 20px; height: 20px; line-height: 20px; text-align: center; border-radius: 50%; background: <?php echo $location['type'] == 'offline' ? '#1a1a2e' : '#e67e22'; ?>; color: white; font-size: 10px; font-weight: 600;"><?php echo $index + 1; ?></span>
+                                        <span style="display: inline-block; width: 20px; height: 20px; line-height: 20px; text-align: center; border-radius: 50%; background: <?php echo $location['type'] == 'offline' ? '#4f8b98' : '#62307a'; ?>; color: white; font-size: 10px; font-weight: 600;"><?php echo $index + 1; ?></span>
                                         <span style="font-size: 12px; color: #111827; font-weight: 500;"><?php echo htmlspecialchars($location['name']); ?></span>
                                         <span style="font-size: 9px; color: #9CA3AF; background: <?php echo $location['type'] == 'offline' ? '#f0f0f0' : '#fff3e0'; ?>; padding: 2px 6px; border-radius: 3px; text-transform: uppercase;"><?php echo $location['type'] == 'offline' ? 'offline' : 'consignment (est.)'; ?></span>
                                     </div>
@@ -1008,14 +1166,16 @@ $donutOffset = $donutCircumference * (1 - max(0, min(100, $ytdPct)) / 100);
                 </div>
             </div>
         </div>
+        </div>
 
         <!-- Row 2: Product and Geographic Dimensions -->
+        <div class="dash-section" data-section-id="top-products-geo" data-section-label-th="สินค้าขายดีและการกระจายภูมิศาสตร์" data-section-label-en="Top Products & Geographic Distribution">
         <div class="row2-grid">
             <!-- Top 5 Online Products (50%) -->
             <div class="chart-card">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
                     <h3 style="margin: 0;">Top 5 Online Products</h3>
-                    <a href="dashboard_online.php" style="font-size: 11px; color: #c9a227; text-decoration: none; font-weight: 500;">View Details →</a>
+                    <a href="dashboard_online.php" style="font-size: 11px; color: #dab937; text-decoration: none; font-weight: 500;">View Details →</a>
                 </div>
                 <div style="padding: 10px 0;">
                     <canvas id="topProductsChart"></canvas>
@@ -1026,25 +1186,28 @@ $donutOffset = $donutCircumference * (1 - max(0, min(100, $ytdPct)) / 100);
             <div class="chart-card">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
                     <h3 style="margin: 0;">Geographic Sales Distribution</h3>
-                    <a href="dashboard_offline.php" style="font-size: 11px; color: #c9a227; text-decoration: none; font-weight: 500;">View Details →</a>
+                    <a href="dashboard_offline.php" style="font-size: 11px; color: #4f8b98; text-decoration: none; font-weight: 500;">View Details →</a>
                 </div>
                 <div style="padding: 10px 0;">
                     <canvas id="geoChoroplethChart"></canvas>
                 </div>
             </div>
         </div>
+        </div>
 
         <!-- Row 3: Top Offline Products (not affected by the Online platform cross-filter — no platform concept applies to retail branches) -->
+        <div class="dash-section" data-section-id="top-offline-products" data-section-label-th="สินค้าขายดีหน้าร้าน" data-section-label-en="Top Offline Products">
         <div class="row3-grid">
             <div class="chart-card">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
                     <h3 style="margin: 0;">Top 5 Offline Products</h3>
-                    <a href="dashboard_offline.php" style="font-size: 11px; color: #c9a227; text-decoration: none; font-weight: 500;">View Details →</a>
+                    <a href="dashboard_offline.php" style="font-size: 11px; color: #4f8b98; text-decoration: none; font-weight: 500;">View Details →</a>
                 </div>
                 <div style="padding: 10px 0;">
                     <canvas id="topOfflineProductsChart"></canvas>
                 </div>
             </div>
+        </div>
         </div>
 
 <script>
@@ -1069,6 +1232,16 @@ $donutOffset = $donutCircumference * (1 - max(0, min(100, $ytdPct)) / 100);
     });
 
     // Monthly Revenue Trend Chart - Combo Chart (Bar + Line)
+    // Channel filter (all/online/offline) hides the non-selected bars + the Total line
+    // (redundant once isolated to one channel) instead of re-querying — same trend data,
+    // just a different view of it.
+    <?php
+    $trendChannelFilter = $filterValues['channel'];
+    $trendHideOnline = ($trendChannelFilter === 'offline');
+    $trendHideOffline = ($trendChannelFilter === 'online');
+    $trendHideConsignment = ($trendChannelFilter !== 'all');
+    $trendHideTotal = ($trendChannelFilter !== 'all');
+    ?>
     const monthlyRevenueCtx = document.getElementById('monthlyRevenueChart').getContext('2d');
 
     const monthlyRevenueData = {
@@ -1078,31 +1251,34 @@ $donutOffset = $donutCircumference * (1 - max(0, min(100, $ytdPct)) / 100);
                 label: 'Online Revenue',
                 data: <?php echo json_encode(array_column($mockData['monthlyTrend'], 'online')); ?>,
                 type: 'bar',
-                backgroundColor: '#c9a227',
-                borderColor: '#c9a227',
+                backgroundColor: '#dab937',
+                borderColor: '#dab937',
                 borderWidth: 1,
                 borderRadius: 4,
-                order: 4
+                order: 4,
+                hidden: <?php echo json_encode($trendHideOnline); ?>
             },
             {
                 label: 'Offline Revenue',
                 data: <?php echo json_encode(array_column($mockData['monthlyTrend'], 'offline')); ?>,
                 type: 'bar',
-                backgroundColor: '#1a1a2e',
-                borderColor: '#1a1a2e',
+                backgroundColor: '#4f8b98',
+                borderColor: '#4f8b98',
                 borderWidth: 1,
                 borderRadius: 4,
-                order: 3
+                order: 3,
+                hidden: <?php echo json_encode($trendHideOffline); ?>
             },
             {
                 label: 'Consignment Revenue (est.)',
                 data: <?php echo json_encode(array_column($mockData['monthlyTrend'], 'consignment')); ?>,
                 type: 'bar',
-                backgroundColor: '#e67e22',
-                borderColor: '#e67e22',
+                backgroundColor: '#62307a',
+                borderColor: '#62307a',
                 borderWidth: 1,
                 borderRadius: 4,
-                order: 2
+                order: 2,
+                hidden: <?php echo json_encode($trendHideConsignment); ?>
             },
             {
                 label: 'Total Revenue',
@@ -1117,7 +1293,8 @@ $donutOffset = $donutCircumference * (1 - max(0, min(100, $ytdPct)) / 100);
                 pointRadius: 4,
                 pointHoverRadius: 6,
                 tension: 0.3,
-                order: 1
+                order: 1,
+                hidden: <?php echo json_encode($trendHideTotal); ?>
             }
         ]
     };
@@ -1217,6 +1394,71 @@ $donutOffset = $donutCircumference * (1 - max(0, min(100, $ytdPct)) / 100);
         }
     });
 
+    // Total Sales Trend Chart (Online + Offline + Consignment est.) - current vs
+    // previous period, area line, granularity follows date_range (see PHP above)
+    const totalSalesTrendCtx = document.getElementById('totalSalesTrendChart').getContext('2d');
+    new Chart(totalSalesTrendCtx, {
+        type: 'line',
+        data: {
+            labels: <?php echo json_encode($totalTrendLabels); ?>,
+            datasets: [
+                {
+                    label: 'ช่วงนี้',
+                    data: <?php echo json_encode($totalTrendCurrent); ?>,
+                    borderColor: '#2f4e9d',
+                    backgroundColor: 'rgba(47, 78, 157, 0.08)',
+                    borderWidth: 2.5,
+                    fill: true,
+                    tension: 0.35,
+                    pointRadius: 0,
+                    pointHoverRadius: 4
+                },
+                {
+                    label: 'ช่วงก่อน',
+                    data: <?php echo json_encode($totalTrendPrevious); ?>,
+                    borderColor: '#9CA3AF',
+                    backgroundColor: 'transparent',
+                    borderWidth: 1.5,
+                    borderDash: [6, 4],
+                    fill: false,
+                    tension: 0.35,
+                    pointRadius: 0,
+                    pointHoverRadius: 4
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+                legend: {
+                    display: true,
+                    position: 'top',
+                    align: 'end',
+                    labels: { usePointStyle: true, padding: 15, font: { size: 12, weight: 500 }, color: '#111827' }
+                },
+                tooltip: {
+                    callbacks: {
+                        label: ctx => ctx.dataset.label + ': ' + new Intl.NumberFormat('th-TH').format(ctx.raw)
+                    }
+                }
+            },
+            scales: {
+                x: { grid: { display: false }, ticks: { color: '#6B7280', font: { size: 11 }, maxRotation: 0, autoSkip: true } },
+                y: {
+                    beginAtZero: true,
+                    ticks: {
+                        maxTicksLimit: 5,
+                        color: '#6B7280',
+                        callback: value => value >= 1000000 ? (value / 1000000).toFixed(1) + 'M' : (value >= 1000 ? (value / 1000).toFixed(0) + 'K' : value)
+                    },
+                    grid: { color: 'rgba(0,0,0,0.05)', drawBorder: false }
+                }
+            }
+        }
+    });
+
     // Channel Contribution Doughnut Chart
     const channelContributionCtx = document.getElementById('channelContributionChart').getContext('2d');
 
@@ -1280,8 +1522,8 @@ $donutOffset = $donutCircumference * (1 - max(0, min(100, $ytdPct)) / 100);
             datasets: [{
                 label: 'Sales (฿)',
                 data: top5Products.map(p => p.sales),
-                backgroundColor: '#c9a227',
-                borderColor: '#c9a227',
+                backgroundColor: '#dab937',
+                borderColor: '#dab937',
                 borderWidth: 1,
                 borderRadius: 4
             }]
@@ -1356,8 +1598,8 @@ $donutOffset = $donutCircumference * (1 - max(0, min(100, $ytdPct)) / 100);
             datasets: [{
                 label: 'Sales (฿)',
                 data: top5OfflineProducts.map(p => p.sales),
-                backgroundColor: '#1a1a2e',
-                borderColor: '#1a1a2e',
+                backgroundColor: '#4f8b98',
+                borderColor: '#4f8b98',
                 borderWidth: 1,
                 borderRadius: 4
             }]

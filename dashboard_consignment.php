@@ -70,10 +70,11 @@ $mockData = [
 // ----- ตัวแปรสำหรับ header.php -----
 $pageTitle    = 'Consignment Dashboard';
 $pageSubtitle = 'Retail Partner Performance Overview';
-$accentColor  = '#8b5cf6';
+$accentColor  = '#62307a'; // Journal brand Purple (2612C) — see BRAND_COLORS.md
 require_once __DIR__ . '/includes/header.php';
 ?>
         <!-- KPI Cards -->
+        <div class="dash-section" data-section-id="kpi-cards" data-section-label-th="การ์ด KPI" data-section-label-en="KPI Cards">
         <div class="kpi-grid max-[900px]:grid-cols-2 max-[480px]:grid-cols-1">
             <div class="kpi-card">
                 <div class="label">Total Revenue</div>
@@ -96,8 +97,10 @@ require_once __DIR__ . '/includes/header.php';
                 <div class="change positive">▲ 2.8% vs last month</div>
             </div>
         </div>
+        </div>
 
         <!-- Charts Section -->
+        <div class="dash-section" data-section-id="charts-section" data-section-label-th="กราฟภาพรวม" data-section-label-en="Charts Overview">
         <div class="charts-grid max-[900px]:grid-cols-1">
             <div class="chart-card">
                 <h3>Monthly Consignment Revenue Trend</h3>
@@ -118,7 +121,8 @@ require_once __DIR__ . '/includes/header.php';
                     </div>
                     <div style="flex: 1; display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px;">
                         <?php
-                        $colors = ['#8b5cf6', '#6366f1', '#3b82f6', '#0ea5e9', '#06b6d4', '#14b8a6'];
+                        // Fixed brand-derived categorical order (validated colorblind-safe) — see BRAND_COLORS.md.
+                        $colors = ['#4b74d8', '#8e792a', '#09899e', '#9b59bc', '#12933f', '#c55123'];
                         foreach ($mockData['partners'] as $index => $partner):
                         ?>
                         <div style="display: flex; align-items: center; gap: 8px;">
@@ -133,8 +137,10 @@ require_once __DIR__ . '/includes/header.php';
                 </div>
             </div>
         </div>
+        </div>
 
         <!-- Partner Performance -->
+        <div class="dash-section" data-section-id="partner-performance" data-section-label-th="ผลการดำเนินงานพาร์ทเนอร์" data-section-label-en="Partner Performance">
         <div class="table-card">
             <h3>Partner Performance</h3>
             <div class="max-[640px]:overflow-x-auto"><table>
@@ -151,7 +157,7 @@ require_once __DIR__ . '/includes/header.php';
                 <tbody>
                     <?php foreach ($mockData['partners'] as $partner): ?>
                     <tr>
-                        <td><span class="badge" style="background: rgba(139, 92, 246, 0.15); color: #8b5cf6;"><?php echo htmlspecialchars($partner['name']); ?></span></td>
+                        <td><span class="badge" style="background: rgba(98, 48, 122, 0.14); color: #62307a;"><?php echo htmlspecialchars($partner['name']); ?></span></td>
                         <td><?php echo number_format($partner['revenue']); ?></td>
                         <td><?php echo number_format($partner['orders']); ?></td>
                         <td><?php echo number_format($partner['aov']); ?></td>
@@ -162,8 +168,10 @@ require_once __DIR__ . '/includes/header.php';
                 </tbody>
             </table></div>
         </div>
+        </div>
 
         <!-- Branch Performance -->
+        <div class="dash-section" data-section-id="branch-performance" data-section-label-th="ผลการดำเนินงานสาขา" data-section-label-en="Branch Performance">
         <div class="table-card">
             <h3>Branch Performance (Top 10)</h3>
             <div class="max-[640px]:overflow-x-auto"><table>
@@ -181,7 +189,7 @@ require_once __DIR__ . '/includes/header.php';
                     <?php foreach ($mockData['branches'] as $branch): ?>
                     <tr>
                         <td><?php echo htmlspecialchars($branch['branch']); ?></td>
-                        <td><span class="badge" style="background: rgba(139, 92, 246, 0.15); color: #8b5cf6;"><?php echo htmlspecialchars($branch['partner']); ?></span></td>
+                        <td><span class="badge" style="background: rgba(98, 48, 122, 0.14); color: #62307a;"><?php echo htmlspecialchars($branch['partner']); ?></span></td>
                         <td><?php echo number_format($branch['revenue']); ?></td>
                         <td><?php echo number_format($branch['orders']); ?></td>
                         <td style="color: #10B981; font-weight: 500;">▲ <?php echo $branch['growth']; ?>%</td>
@@ -191,8 +199,10 @@ require_once __DIR__ . '/includes/header.php';
                 </tbody>
             </table></div>
         </div>
+        </div>
 
         <!-- Top Selling Products -->
+        <div class="dash-section" data-section-id="top-products" data-section-label-th="สินค้าขายดี" data-section-label-en="Top Selling Products">
         <div class="table-card">
             <h3>Top Selling Products (Consignment)</h3>
             <div class="max-[640px]:overflow-x-auto"><table>
@@ -209,7 +219,7 @@ require_once __DIR__ . '/includes/header.php';
                     <?php foreach ($mockData['topProducts'] as $product): ?>
                     <tr>
                         <td><?php echo htmlspecialchars($product['product']); ?></td>
-                        <td><span class="badge" style="background: rgba(139, 92, 246, 0.15); color: #8b5cf6;"><?php echo htmlspecialchars($product['partner']); ?></span></td>
+                        <td><span class="badge" style="background: rgba(98, 48, 122, 0.14); color: #62307a;"><?php echo htmlspecialchars($product['partner']); ?></span></td>
                         <td><?php echo number_format($product['revenue']); ?></td>
                         <td><?php echo number_format($product['orders']); ?></td>
                         <td><?php echo number_format($product['aov']); ?></td>
@@ -218,8 +228,10 @@ require_once __DIR__ . '/includes/header.php';
                 </tbody>
             </table></div>
         </div>
+        </div>
 
         <!-- Inventory Status -->
+        <div class="dash-section" data-section-id="inventory-status" data-section-label-th="สถานะสินค้าคงคลัง" data-section-label-en="Inventory Status">
         <div class="table-card">
             <h3>Inventory Status</h3>
             <div class="max-[640px]:overflow-x-auto"><table>
@@ -235,7 +247,7 @@ require_once __DIR__ . '/includes/header.php';
                 <tbody>
                     <?php foreach ($mockData['inventory'] as $item): ?>
                     <tr>
-                        <td><span class="badge" style="background: rgba(139, 92, 246, 0.15); color: #8b5cf6;"><?php echo htmlspecialchars($item['partner']); ?></span></td>
+                        <td><span class="badge" style="background: rgba(98, 48, 122, 0.14); color: #62307a;"><?php echo htmlspecialchars($item['partner']); ?></span></td>
                         <td><?php echo number_format($item['currentStock']); ?></td>
                         <td><?php echo $item['sellThrough']; ?>%</td>
                         <td><?php echo $item['daysOnHand']; ?> days</td>
@@ -244,6 +256,7 @@ require_once __DIR__ . '/includes/header.php';
                     <?php endforeach; ?>
                 </tbody>
             </table></div>
+        </div>
         </div>
 
 <script>
@@ -257,8 +270,8 @@ require_once __DIR__ . '/includes/header.php';
                 label: 'Revenue (฿)',
                 data: <?php echo json_encode(array_column($mockData['monthlyTrend'], 'revenue')); ?>,
                 type: 'bar',
-                backgroundColor: '#8b5cf6',
-                borderColor: '#8b5cf6',
+                backgroundColor: '#62307a',
+                borderColor: '#62307a',
                 borderWidth: 1,
                 yAxisID: 'y',
                 order: 2
@@ -267,10 +280,10 @@ require_once __DIR__ . '/includes/header.php';
                 label: 'Orders',
                 data: <?php echo json_encode(array_column($mockData['monthlyTrend'], 'orders')); ?>,
                 type: 'line',
-                backgroundColor: '#3b82f6',
-                borderColor: '#3b82f6',
+                backgroundColor: '#6B7280',
+                borderColor: '#6B7280',
                 borderWidth: 2,
-                pointBackgroundColor: '#3b82f6',
+                pointBackgroundColor: '#6B7280',
                 pointBorderColor: '#fff',
                 pointBorderWidth: 2,
                 pointRadius: 4,
@@ -359,7 +372,7 @@ require_once __DIR__ . '/includes/header.php';
                             size: 11,
                             weight: 500
                         },
-                        color: '#8b5cf6'
+                        color: '#62307a'
                     },
                     ticks: {
                         callback: function(value) {
@@ -389,7 +402,7 @@ require_once __DIR__ . '/includes/header.php';
                             size: 11,
                             weight: 500
                         },
-                        color: '#3b82f6'
+                        color: '#6B7280'
                     },
                     ticks: {
                         font: {
@@ -413,7 +426,9 @@ require_once __DIR__ . '/includes/header.php';
         labels: <?php echo json_encode(array_column($mockData['partners'], 'name')); ?>,
         datasets: [{
             data: <?php echo json_encode(array_column($mockData['partners'], 'revenue')); ?>,
-            backgroundColor: ['#8b5cf6', '#6366f1', '#3b82f6', '#0ea5e9', '#06b6d4', '#14b8a6'],
+            // Same order as the legend swatches above — driven from the one PHP $colors
+            // array so the donut and its legend can never drift apart.
+            backgroundColor: <?php echo json_encode(array_slice($colors, 0, count($mockData['partners']))); ?>,
             borderWidth: 0,
             hoverOffset: 4
         }]

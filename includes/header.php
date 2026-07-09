@@ -108,6 +108,15 @@ $headerText = [
         'english' => 'อังกฤษ',
         'reset' => 'ล้างตัวกรอง',
         'search' => 'ค้นหา',
+        'sections_button' => 'จัดการ Section',
+        'sections_panel_title' => 'จัดเรียง / ซ่อน Section',
+        'sections_panel_hint' => 'เลือกตำแหน่งงาน เพื่อจัดชุดข้อมูลอัตโนมัติ หรือลากสลับ/ติ๊กซ่อนเองได้',
+        'role_ceo' => 'CEO',
+        'role_manager' => 'Manager',
+        'role_operation' => 'Operation',
+        'role_select_placeholder' => 'เลือกตำแหน่ง',
+        'sections_reset' => 'คืนค่าเริ่มต้น',
+        'sections_close' => 'ปิด',
     ],
     'en' => [
         'dashboard' => 'Dashboard',
@@ -145,6 +154,15 @@ $headerText = [
         'english' => 'English',
         'reset' => 'Reset',
         'search' => 'Search',
+        'sections_button' => 'Manage Sections',
+        'sections_panel_title' => 'Arrange / Hide Sections',
+        'sections_panel_hint' => 'Pick a role to auto-arrange sections, or drag to reorder / untick to hide.',
+        'role_ceo' => 'CEO',
+        'role_manager' => 'Manager',
+        'role_operation' => 'Operation',
+        'role_select_placeholder' => 'Select role',
+        'sections_reset' => 'Reset to default',
+        'sections_close' => 'Close',
     ],
 ];
 $headerUi = $headerText[$uiLanguage];
@@ -437,6 +455,9 @@ if (!function_exists('render_change')) {
 
         .container { max-width: 1400px; margin: 30px auto; padding: 0 20px; }
 
+        .dash-section { margin-bottom: 30px; }
+        .dash-section:last-child { margin-bottom: 0; }
+
         .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin-bottom: 30px; }
         .kpi-card { background: white; padding: 25px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); cursor: pointer; transition: transform 0.2s ease, box-shadow 0.2s ease; position: relative; }
         .kpi-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.12); }
@@ -546,7 +567,7 @@ if (!function_exists('render_change')) {
         .goal-card .stat-value { font-size: 24px; font-weight: 300; color: white; }
     </style>
 </head>
-<body>
+<body data-ui-lang="<?php echo htmlspecialchars($uiLanguage); ?>" data-current-page="<?php echo htmlspecialchars($currentPage); ?>">
     <div class="header">
         <div>
             <h1><?php echo htmlspecialchars($pageTitle); ?></h1>
@@ -651,8 +672,17 @@ if (!function_exists('render_change')) {
     <div class="filter-actions">
         <a class="filter-btn filter-btn-ghost" href="<?php echo htmlspecialchars(header_url_with_lang($currentPage, $uiLanguage)); ?>"><?php echo htmlspecialchars(header_ui_text($headerUi, 'reset')); ?></a>
         <button type="submit" class="filter-btn filter-btn-primary"><?php echo htmlspecialchars(header_ui_text($headerUi, 'search')); ?></button>
+        <select id="roleQuickSelect" class="filter-btn filter-btn-ghost" style="padding-right: 12px; appearance: auto;" onchange="window.SectionManager && window.SectionManager.applyRole(this.value)">
+            <option value=""><?php echo htmlspecialchars(header_ui_text($headerUi, 'role_select_placeholder')); ?></option>
+            <option value="ceo"><?php echo htmlspecialchars(header_ui_text($headerUi, 'role_ceo')); ?></option>
+            <option value="manager"><?php echo htmlspecialchars(header_ui_text($headerUi, 'role_manager')); ?></option>
+            <option value="operation"><?php echo htmlspecialchars(header_ui_text($headerUi, 'role_operation')); ?></option>
+        </select>
+        <button type="button" id="sectionManagerBtn" class="filter-btn filter-btn-ghost" onclick="window.SectionManager && window.SectionManager.open()"><?php echo htmlspecialchars(header_ui_text($headerUi, 'sections_button')); ?></button>
     </div>
     </form>
+
+    <?php require __DIR__ . '/section_manager_panel.php'; ?>
 
     <script>
         function scrollToSection(sectionId) {
