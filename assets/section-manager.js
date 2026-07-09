@@ -11,10 +11,10 @@
             }
         },
         'dashboard_online.php': {
-            sections: ['kpi-cards', 'performance-diagnosis', 'product-mix-grid', 'platform-top-products-tables', 'daily-control', 'discount-anomaly'],
+            sections: ['kpi-cards', 'performance-diagnosis', 'product-mix-grid', 'platform-top-products-tables', 'daily-control', 'discount-anomaly', 'customer-insights'],
             roles: {
                 ceo: ['kpi-cards', 'performance-diagnosis'],
-                manager: ['kpi-cards', 'performance-diagnosis', 'product-mix-grid', 'platform-top-products-tables'],
+                manager: ['kpi-cards', 'performance-diagnosis', 'product-mix-grid', 'platform-top-products-tables', 'customer-insights'],
                 operation: ['kpi-cards', 'daily-control', 'discount-anomaly', 'performance-diagnosis']
             }
         },

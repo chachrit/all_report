@@ -99,6 +99,111 @@ function product_group_label(string $key): string
     return $labels[$key] ?? $key;
 }
 
+/**
+ * DimOnlineCustomer.province is free text typed by customers at checkout, not a
+ * dropdown against Thailand's 77-province list — the same value shows up as e.g.
+ * "จังหวัดกรุงเทพมหานคร" / "กรุงเทพฯ" / "กรุงเทพมหานคร" / "Bangkok" / "กรุงเทพ" all at once,
+ * and a long tail of postal codes, district names, and non-Thai text. LIKE-matching
+ * each of the 77 official provinces' Thai name + common English name against the raw
+ * column (verified against the full distinct list) collapses that into ~77 clean
+ * buckets covering 99.83% of rows; anything unmatched (foreign-language entries,
+ * postal codes, sub-district-only addresses) falls into one "อื่นๆ/ไม่ระบุ" bucket
+ * rather than being silently dropped.
+ */
+function province_group_case(string $column = 'c.province'): string
+{
+    $map = [
+        'กรุงเทพ' => 'กรุงเทพมหานคร', 'Bangkok' => 'กรุงเทพมหานคร',
+        'ชลบุรี' => 'ชลบุรี', 'Chon Buri' => 'ชลบุรี',
+        'สมุทรปราการ' => 'สมุทรปราการ', 'Samut Prakan' => 'สมุทรปราการ',
+        'นนทบุรี' => 'นนทบุรี', 'Nonthaburi' => 'นนทบุรี',
+        'ปทุมธานี' => 'ปทุมธานี', 'Pathum Thani' => 'ปทุมธานี',
+        'เชียงใหม่' => 'เชียงใหม่', 'Chiang Mai' => 'เชียงใหม่',
+        'สงขลา' => 'สงขลา', 'Songkhla' => 'สงขลา',
+        'ภูเก็ต' => 'ภูเก็ต', 'Phuket' => 'ภูเก็ต',
+        'ระยอง' => 'ระยอง', 'Rayong' => 'ระยอง',
+        'นครราชสีมา' => 'นครราชสีมา', 'Nakhon Ratchasima' => 'นครราชสีมา',
+        'สุราษฎร์ธานี' => 'สุราษฎร์ธานี', 'Surat Thani' => 'สุราษฎร์ธานี',
+        'นครปฐม' => 'นครปฐม', 'Nakhon Pathom' => 'นครปฐม',
+        'สมุทรสาคร' => 'สมุทรสาคร', 'Samut Sakhon' => 'สมุทรสาคร',
+        'ขอนแก่น' => 'ขอนแก่น', 'Khon Kaen' => 'ขอนแก่น',
+        'นครศรีธรรมราช' => 'นครศรีธรรมราช', 'Nakhon Si Thammarat' => 'นครศรีธรรมราช',
+        'พระนครศรีอยุธยา' => 'พระนครศรีอยุธยา', 'Phra Nakhon Si Ayutthaya' => 'พระนครศรีอยุธยา',
+        'เชียงราย' => 'เชียงราย', 'Chiang Rai' => 'เชียงราย',
+        'อุดรธานี' => 'อุดรธานี', 'Udon Thani' => 'อุดรธานี',
+        'ฉะเชิงเทรา' => 'ฉะเชิงเทรา', 'Chachoengsao' => 'ฉะเชิงเทรา',
+        'อุบลราชธานี' => 'อุบลราชธานี', 'Ubon Ratchathani' => 'อุบลราชธานี',
+        'จันทบุรี' => 'จันทบุรี', 'Chanthaburi' => 'จันทบุรี',
+        'สระบุรี' => 'สระบุรี', 'Saraburi' => 'สระบุรี',
+        'ราชบุรี' => 'ราชบุรี', 'Ratchaburi' => 'ราชบุรี',
+        'พิษณุโลก' => 'พิษณุโลก', 'Phitsanulok' => 'พิษณุโลก',
+        'กระบี่' => 'กระบี่', 'Krabi' => 'กระบี่',
+        'ประจวบคีรีขันธ์' => 'ประจวบคีรีขันธ์', 'Prachuap Khiri Khan' => 'ประจวบคีรีขันธ์',
+        'หนองคาย' => 'หนองคาย', 'Nong Khai' => 'หนองคาย',
+        'กาญจนบุรี' => 'กาญจนบุรี', 'Kanchanaburi' => 'กาญจนบุรี',
+        'นครสวรรค์' => 'นครสวรรค์', 'Nakhon Sawan' => 'นครสวรรค์',
+        'พัทลุง' => 'พัทลุง', 'Phatthalung' => 'พัทลุง',
+        'บุรีรัมย์' => 'บุรีรัมย์', 'Buri Ram' => 'บุรีรัมย์',
+        'สุพรรณบุรี' => 'สุพรรณบุรี', 'Suphan Buri' => 'สุพรรณบุรี',
+        'ปราจีนบุรี' => 'ปราจีนบุรี', 'Prachin Buri' => 'ปราจีนบุรี',
+        'ลพบุรี' => 'ลพบุรี', 'Lop Buri' => 'ลพบุรี',
+        'ชุมพร' => 'ชุมพร', 'Chumphon' => 'ชุมพร',
+        'เพชรบุรี' => 'เพชรบุรี', 'Phetchaburi' => 'เพชรบุรี',
+        'ตรัง' => 'ตรัง', 'Trang' => 'ตรัง',
+        'ลำปาง' => 'ลำปาง', 'Lampang' => 'ลำปาง',
+        'เพชรบูรณ์' => 'เพชรบูรณ์', 'Phetchabun' => 'เพชรบูรณ์',
+        'สุรินทร์' => 'สุรินทร์', 'Surin' => 'สุรินทร์',
+        'สระแก้ว' => 'สระแก้ว', 'Sa Kaeo' => 'สระแก้ว',
+        'กำแพงเพชร' => 'กำแพงเพชร', 'Kamphaeng Phet' => 'กำแพงเพชร',
+        'ร้อยเอ็ด' => 'ร้อยเอ็ด', 'Roi Et' => 'ร้อยเอ็ด',
+        'มหาสารคาม' => 'มหาสารคาม', 'Maha Sarakham' => 'มหาสารคาม',
+        'ศรีสะเกษ' => 'ศรีสะเกษ', 'Si Sa Ket' => 'ศรีสะเกษ',
+        'สกลนคร' => 'สกลนคร', 'Sakon Nakhon' => 'สกลนคร',
+        'ตาก' => 'ตาก', 'Tak' => 'ตาก',
+        'พังงา' => 'พังงา', 'Phang Nga' => 'พังงา',
+        'ยะลา' => 'ยะลา', 'Yala' => 'ยะลา',
+        'ชัยภูมิ' => 'ชัยภูมิ', 'Chaiyaphum' => 'ชัยภูมิ',
+        'ลำพูน' => 'ลำพูน', 'Lamphun' => 'ลำพูน',
+        'เลย' => 'เลย', 'Loei' => 'เลย',
+        'กาฬสินธุ์' => 'กาฬสินธุ์', 'Kalasin' => 'กาฬสินธุ์',
+        'ปัตตานี' => 'ปัตตานี', 'Pattani' => 'ปัตตานี',
+        'นราธิวาส' => 'นราธิวาส', 'Narathiwat' => 'นราธิวาส',
+        'ตราด' => 'ตราด', 'Trat' => 'ตราด',
+        'นครพนม' => 'นครพนม', 'Nakhon Phanom' => 'นครพนม',
+        'สุโขทัย' => 'สุโขทัย', 'Sukhothai' => 'สุโขทัย',
+        'พิจิตร' => 'พิจิตร', 'Phichit' => 'พิจิตร',
+        'พะเยา' => 'พะเยา', 'Phayao' => 'พะเยา',
+        'สตูล' => 'สตูล', 'Satun' => 'สตูล',
+        'นครนายก' => 'นครนายก', 'Nakhon Nayok' => 'นครนายก',
+        'อุตรดิตถ์' => 'อุตรดิตถ์', 'Uttaradit' => 'อุตรดิตถ์',
+        'แพร่' => 'แพร่', 'Phrae' => 'แพร่',
+        'น่าน' => 'น่าน', 'Nan' => 'น่าน',
+        'สมุทรสงคราม' => 'สมุทรสงคราม', 'Samut Songkhram' => 'สมุทรสงคราม',
+        'ชัยนาท' => 'ชัยนาท', 'Chai Nat' => 'ชัยนาท',
+        'อ่างทอง' => 'อ่างทอง', 'Ang Thong' => 'อ่างทอง',
+        'หนองบัวลำภู' => 'หนองบัวลำภู', 'Nong Bua Lam Phu' => 'หนองบัวลำภู',
+        'อุทัยธานี' => 'อุทัยธานี', 'Uthai Thani' => 'อุทัยธานี',
+        'ระนอง' => 'ระนอง', 'Ranong' => 'ระนอง',
+        'บึงกาฬ' => 'บึงกาฬ', 'Bueng Kan' => 'บึงกาฬ',
+        'ยโสธร' => 'ยโสธร', 'Yasothon' => 'ยโสธร',
+        'มุกดาหาร' => 'มุกดาหาร', 'Mukdahan' => 'มุกดาหาร',
+        'อำนาจเจริญ' => 'อำนาจเจริญ', 'Amnat Charoen' => 'อำนาจเจริญ',
+        'แม่ฮ่องสอน' => 'แม่ฮ่องสอน', 'Mae Hong Son' => 'แม่ฮ่องสอน',
+        'สิงห์บุรี' => 'สิงห์บุรี', 'Sing Buri' => 'สิงห์บุรี',
+    ];
+    // Longest key first — defends against a shorter key accidentally matching inside a
+    // longer, unrelated one (verified no such collision exists in this map today, but
+    // cheap insurance against a bad addition later).
+    uksort($map, fn($a, $b) => mb_strlen($b) <=> mb_strlen($a));
+    $cases = [];
+    foreach ($map as $needle => $canon) {
+        $n = str_replace("'", "''", $needle);
+        $c = str_replace("'", "''", $canon);
+        $cases[] = "WHEN {$column} LIKE '%{$n}%' THEN N'{$c}'";
+    }
+    return "CASE\n        " . implode("\n        ", $cases) . "\n        ELSE N'อื่นๆ/ไม่ระบุ'\n    END";
+}
+
 function ui_text(array $ui, string $key): string
 {
     return $ui[$key] ?? $key;
@@ -248,6 +353,19 @@ $translations = [
         'tooltip_vs_prev_month' => 'ยอดคาดการณ์สิ้นเดือนนี้ เทียบกับยอดขายจริงทั้งเดือนของเดือนก่อนหน้า',
         'tooltip_vs_same_month_ly' => 'ยอดคาดการณ์สิ้นเดือนนี้ เทียบกับยอดขายจริงของเดือนเดียวกันปีที่แล้ว แสดงเฉพาะเมื่อมีข้อมูลปีก่อนที่เชื่อถือได้ (เริ่ม ธ.ค. 2025)',
         'tooltip_lost_revenue' => 'ยอดขายที่หายไปจากออเดอร์ที่ถูกยกเลิกหรือคืนสินค้า ในช่วงเวลาที่เลือก',
+        'customer_insights' => 'ข้อมูลเชิงลึกลูกค้า',
+        'customer_analysis' => 'สำหรับทีม CRM และการตลาด',
+        'segment_revenue_chart' => 'ยอดขายและ AOV ตามระดับลูกค้า',
+        'tooltip_segment_revenue' => 'ยอดขายสุทธิและค่าเฉลี่ยต่อออเดอร์ (AOV) แยกตามระดับลูกค้า (New/Regular/VIP) ในช่วงเวลาที่เลือกด้านบน ระดับลูกค้ามาจาก DimOnlineCustomer.customer_segment ซึ่งกำหนดโดยทีม ETL ไม่ใช่ query นี้',
+        'repeat_purchase_chart' => 'จำนวนออเดอร์สะสมต่อลูกค้า',
+        'tooltip_repeat_purchase' => 'นับจำนวนออเดอร์ทั้งหมด (ตลอดประวัติ ไม่ขึ้นกับตัวกรองช่วงเวลาด้านบน) ที่ลูกค้าแต่ละคนเคยสั่ง ใช้ดูสัดส่วนลูกค้าซื้อครั้งเดียวเทียบกับลูกค้าประจำ',
+        'bucket_1' => 'ซื้อ 1 ครั้ง',
+        'bucket_2_3' => 'ซื้อ 2-3 ครั้ง',
+        'bucket_4_9' => 'ซื้อ 4-9 ครั้ง',
+        'bucket_10_plus' => 'ซื้อ 10+ ครั้ง',
+        'customers_col' => 'จำนวนลูกค้า',
+        'province_revenue_chart' => 'ยอดขาย 10 จังหวัดสูงสุด',
+        'tooltip_province_revenue' => 'ยอดขายสุทธิแยกตามจังหวัดของลูกค้า (10 อันดับแรก) ในช่วงเวลาที่เลือกด้านบน จังหวัดมาจากช่องที่ลูกค้ากรอกเองตอนสั่งซื้อ (ไม่ใช่ dropdown) จึงรวมคำสะกด/ภาษาที่ต่างกันเข้าด้วยกันก่อนแสดงผล (ครอบคลุม 99.8% ของข้อมูล ส่วนที่เหลืออ่านไม่ออก/ไม่ใช่จังหวัดจริงถูกจัดเป็นกลุ่ม "อื่นๆ/ไม่ระบุ" แทนการทิ้งไป)',
     ],
     'en' => [
         'page_title' => 'Online Sales Dashboard',
@@ -355,6 +473,19 @@ $translations = [
         'tooltip_vs_prev_month' => 'This month\'s projected total compared with last month\'s actual full-month sales.',
         'tooltip_vs_same_month_ly' => 'This month\'s projected total compared with the same month last year. Only shown once reliable prior-year data exists (from Dec 2025).',
         'tooltip_lost_revenue' => 'Sales value lost from orders that were cancelled or returned in the selected period.',
+        'customer_insights' => 'Customer Insights',
+        'customer_analysis' => 'For CRM and marketing teams',
+        'segment_revenue_chart' => 'Net Sales & AOV by Customer Segment',
+        'tooltip_segment_revenue' => 'Net sales and average order value (AOV) split by customer segment (New/Regular/VIP) for the selected date range above. Segment comes from DimOnlineCustomer.customer_segment, assigned by the ETL, not computed here.',
+        'repeat_purchase_chart' => 'Lifetime Orders per Customer',
+        'tooltip_repeat_purchase' => 'Counts each customer\'s total order count across their full history (independent of the date-range filter above). Shows the one-time-buyer vs repeat-customer split.',
+        'bucket_1' => '1 order',
+        'bucket_2_3' => '2-3 orders',
+        'bucket_4_9' => '4-9 orders',
+        'bucket_10_plus' => '10+ orders',
+        'customers_col' => 'Customers',
+        'province_revenue_chart' => 'Top 10 Provinces by Net Sales',
+        'tooltip_province_revenue' => 'Net sales by customer province (top 10) for the selected date range above. Province is free text typed by the customer at checkout, not a dropdown — variant spellings/languages are collapsed into one bucket per province before charting (covers 99.8% of rows; unreadable/non-province entries land in an "อื่นๆ/ไม่ระบุ" (Other/Unspecified) bucket instead of being dropped).',
     ],
 ];
 $ui = $translations[$uiLanguage];
@@ -1003,6 +1134,70 @@ foreach ($weekdayOrderRows as $row) {
     $weekdayOrdersByDow[(int) $row['dow']] = (int) n($row['orders']);
 }
 
+/**
+ * Segment revenue/AOV respects the same period+platform filters as the rest of the
+ * page (headerSql/itemAggCte) — unlike Peak Hours/Weekday, this isn't a fixed trailing
+ * window, since "which segment drove this month's sales" is meaningful per period.
+ * Segment itself (New/Regular/VIP) is assigned upstream by the ETL on
+ * DimOnlineCustomer.customer_segment — not derived here.
+ */
+$segmentRevenueRows = fetch_all($conn, "
+    WITH {$itemAggCte}
+    SELECT c.customer_segment AS segment, COUNT(DISTINCT o.order_key) AS orders, SUM(ia.netSales) AS netSales
+    FROM fact_online_orders o
+    JOIN item_agg ia ON ia.order_key = o.order_key
+    JOIN DimOnlineCustomer c ON c.customer_key = o.customer_key
+    WHERE o.order_datetime >= ? AND o.order_datetime < ? {$headerSql}{$validSalesSql}
+    GROUP BY c.customer_segment
+    ORDER BY netSales DESC;
+", array_merge($itemParams, [$periodStart, $periodEnd], $headerParams));
+
+$segmentOrder = ['VIP', 'Regular', 'New'];
+usort($segmentRevenueRows, fn($a, $b) => array_search($a['segment'], $segmentOrder) <=> array_search($b['segment'], $segmentOrder));
+
+/**
+ * Repeat-purchase distribution is deliberately lifetime (no date-range filter) — a
+ * customer's total order count only makes sense measured across their whole history,
+ * same rationale as Peak Hours/Weekday above using a fixed window instead of the page
+ * filter. Still respects the platform filter via $headerSql.
+ */
+$repeatPurchaseRows = fetch_all($conn, "
+    SELECT bucket, COUNT(*) AS customers FROM (
+        SELECT o.customer_key,
+            CASE WHEN COUNT(*) = 1 THEN '1'
+                 WHEN COUNT(*) BETWEEN 2 AND 3 THEN '2_3'
+                 WHEN COUNT(*) BETWEEN 4 AND 9 THEN '4_9'
+                 ELSE '10_plus' END AS bucket
+        FROM fact_online_orders o
+        WHERE 1=1 {$headerSql}{$validSalesSql}
+        GROUP BY o.customer_key
+    ) t
+    GROUP BY bucket;
+", $headerParams);
+
+$repeatPurchaseBuckets = ['1', '2_3', '4_9', '10_plus'];
+$repeatPurchaseCounts = array_fill_keys($repeatPurchaseBuckets, 0);
+foreach ($repeatPurchaseRows as $row) {
+    $repeatPurchaseCounts[$row['bucket']] = (int) n($row['customers']);
+}
+
+/**
+ * Top 10 provinces by net sales, same period+platform filters as the rest of the page.
+ * province_group_case() collapses the free-text province column into clean buckets —
+ * see its docblock for why that's needed before this can be charted at all.
+ */
+$provinceGroupCase = province_group_case('c.province');
+$provinceRevenueRows = fetch_all($conn, "
+    WITH {$itemAggCte}
+    SELECT TOP 10 {$provinceGroupCase} AS provinceGroup, COUNT(DISTINCT o.order_key) AS orders, SUM(ia.netSales) AS netSales
+    FROM fact_online_orders o
+    JOIN item_agg ia ON ia.order_key = o.order_key
+    JOIN DimOnlineCustomer c ON c.customer_key = o.customer_key
+    WHERE o.order_datetime >= ? AND o.order_datetime < ? {$headerSql}{$validSalesSql}
+    GROUP BY {$provinceGroupCase}
+    ORDER BY netSales DESC;
+", array_merge($itemParams, [$periodStart, $periodEnd], $headerParams));
+
 $pageTitle = ui_text($ui, 'page_title');
 $pageSubtitle = ui_text($ui, 'page_subtitle');
 $accentColor = '#dab937'; // Journal brand Gold (116C) — see BRAND_COLORS.md
@@ -1392,6 +1587,27 @@ require_once __DIR__ . '/includes/header.php';
 </div>
 </div>
 
+<div class="dash-section" data-section-id="customer-insights" data-section-label-th="ข้อมูลเชิงลึกลูกค้า" data-section-label-en="Customer Insights">
+<div class="section-title">
+    <h2><?php echo htmlspecialchars(ui_text($ui, 'customer_insights')); ?></h2>
+    <span><?php echo htmlspecialchars(ui_text($ui, 'customer_analysis')); ?></span>
+</div>
+<div class="analysis-grid">
+    <div class="chart-card">
+        <h3><?php echo htmlspecialchars(ui_text($ui, 'segment_revenue_chart')); ?><?php echo hint_icon(ui_text($ui, 'tooltip_segment_revenue')); ?></h3>
+        <div class="chart-box"><canvas id="segmentRevenueChart"></canvas></div>
+    </div>
+    <div class="chart-card">
+        <h3><?php echo htmlspecialchars(ui_text($ui, 'repeat_purchase_chart')); ?><?php echo hint_icon(ui_text($ui, 'tooltip_repeat_purchase')); ?></h3>
+        <div class="chart-box"><canvas id="repeatPurchaseChart"></canvas></div>
+    </div>
+</div>
+<div class="chart-card" style="margin-top: 20px;">
+    <h3><?php echo htmlspecialchars(ui_text($ui, 'province_revenue_chart')); ?><?php echo hint_icon(ui_text($ui, 'tooltip_province_revenue')); ?></h3>
+    <div class="chart-box"><canvas id="provinceRevenueChart"></canvas></div>
+</div>
+</div>
+
 <script>
 // Fixed brand-derived categorical order (validated colorblind-safe) — see BRAND_COLORS.md.
 // Same order used on every dashboard's multi-category charts, never reordered per chart.
@@ -1614,6 +1830,107 @@ new Chart(document.getElementById('weekdayOrdersChart'), {
         scales: {
             x: { grid: { display: false }, ticks: { color: '#6B7280' } },
             y: { ticks: { callback: shortNumber, color: '#6B7280' }, grid: { color: 'rgba(0,0,0,0.05)' } }
+        }
+    }
+});
+
+new Chart(document.getElementById('segmentRevenueChart'), {
+    data: {
+        labels: <?php echo json_encode(array_column($segmentRevenueRows, 'segment')); ?>,
+        datasets: [
+            {
+                type: 'bar',
+                label: <?php echo json_encode(ui_text($ui, 'chart_net_sales')); ?>,
+                data: <?php echo json_encode(array_map('n', array_column($segmentRevenueRows, 'netSales'))); ?>,
+                backgroundColor: '#dab937',
+                borderWidth: 0,
+                borderRadius: 4,
+                yAxisID: 'y'
+            },
+            {
+                type: 'line',
+                label: <?php echo json_encode(ui_text($ui, 'aov')); ?>,
+                data: <?php echo json_encode(array_map(function ($row) {
+                    $orders = n($row['orders']);
+                    return $orders > 0 ? n($row['netSales']) / $orders : 0;
+                }, $segmentRevenueRows)); ?>,
+                borderColor: '#4b74d8',
+                backgroundColor: '#4b74d8',
+                tension: 0.3,
+                yAxisID: 'y1'
+            }
+        ]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+            legend: { position: 'top', align: 'end', labels: { usePointStyle: true } },
+            tooltip: { callbacks: { label: ctx => ctx.dataset.label + ': ' + numberFormat.format(ctx.raw) } }
+        },
+        scales: {
+            x: { grid: { display: false }, ticks: { color: '#6B7280' } },
+            y: { position: 'left', ticks: { callback: shortNumber, color: '#6B7280' }, grid: { color: 'rgba(0,0,0,0.05)' } },
+            y1: { position: 'right', ticks: { callback: shortNumber, color: '#6B7280' }, grid: { display: false } }
+        }
+    }
+});
+
+new Chart(document.getElementById('repeatPurchaseChart'), {
+    type: 'bar',
+    data: {
+        labels: [
+            <?php echo json_encode(ui_text($ui, 'bucket_1')); ?>,
+            <?php echo json_encode(ui_text($ui, 'bucket_2_3')); ?>,
+            <?php echo json_encode(ui_text($ui, 'bucket_4_9')); ?>,
+            <?php echo json_encode(ui_text($ui, 'bucket_10_plus')); ?>
+        ],
+        datasets: [{
+            label: <?php echo json_encode(ui_text($ui, 'customers_col')); ?>,
+            data: <?php echo json_encode(array_values($repeatPurchaseCounts)); ?>,
+            backgroundColor: ['#9CA3AF', '#8e792a', '#09899e', '#12933f'],
+            borderWidth: 0,
+            borderRadius: 4
+        }]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+            legend: { display: false },
+            tooltip: { callbacks: { label: ctx => ctx.dataset.label + ': ' + numberFormat.format(ctx.raw) } }
+        },
+        scales: {
+            x: { grid: { display: false }, ticks: { color: '#6B7280' } },
+            y: { ticks: { callback: shortNumber, color: '#6B7280' }, grid: { color: 'rgba(0,0,0,0.05)' } }
+        }
+    }
+});
+
+new Chart(document.getElementById('provinceRevenueChart'), {
+    type: 'bar',
+    data: {
+        labels: <?php echo json_encode(array_column($provinceRevenueRows, 'provinceGroup')); ?>,
+        datasets: [{
+            label: <?php echo json_encode(ui_text($ui, 'chart_net_sales')); ?>,
+            data: <?php echo json_encode(array_map('n', array_column($provinceRevenueRows, 'netSales'))); ?>,
+            backgroundColor: '#dab937',
+            borderWidth: 0,
+            borderRadius: 4
+        }]
+    },
+    options: {
+        indexAxis: 'y',
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+            legend: { display: false },
+            tooltip: { callbacks: { label: ctx => ctx.dataset.label + ': ' + numberFormat.format(ctx.raw) } }
+        },
+        scales: {
+            x: { ticks: { callback: shortNumber, color: '#6B7280' }, grid: { color: 'rgba(0,0,0,0.05)' } },
+            y: { grid: { display: false }, ticks: { color: '#6B7280' } }
         }
     }
 });
