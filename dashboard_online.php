@@ -255,7 +255,6 @@ $translations = [
         'mtd' => 'เดือนนี้',
         'ytd' => 'ปีนี้',
         'online' => 'ออนไลน์',
-        'all_online' => 'ออนไลน์ทั้งหมด',
         'platform' => 'แพลตฟอร์ม',
         'all_categories' => 'ทุกหมวดหมู่',
         'body_oil_sunscreen' => 'Body Oil Sunscreen',
@@ -375,7 +374,6 @@ $translations = [
         'mtd' => 'MTD',
         'ytd' => 'YTD',
         'online' => 'Online',
-        'all_online' => 'All Online',
         'platform' => 'Platform',
         'all_categories' => 'All Categories',
         'body_oil_sunscreen' => 'Body Oil Sunscreen',
@@ -504,7 +502,16 @@ foreach ($shopRows as $shopRow) {
 $filterValues = [
     'lang' => $uiLanguage,
     'date_range' => request_value('date_range', 'mtd', ['today', 'mtd', 'ytd']),
-    'channel' => request_value('channel', 'online', ['all', 'online']),
+    /**
+     * Only one real option — this file only ever reads fact_online_orders, there's no
+     * offline data source here to switch to. Used to also allow 'all' ("All Online"),
+     * but that value was never read in any SQL WHERE clause: audit proved
+     * ?channel=all vs ?channel=online rendered byte-identical HTML except which
+     * dropdown option showed selected — a fake choice that did nothing. Restricted to
+     * the one real value, same pattern dashboard_offline.php already uses for its own
+     * single-channel dropdown.
+     */
+    'channel' => request_value('channel', 'online', ['online']),
     'branch' => request_value('branch', 'all', array_keys($shopOptions)),
     'category' => request_value('category', 'all', ['all', 'body_oil_sunscreen', 'body_oil', 'parfum', 'body_mist', 'lip_oil', 'hand_cream', 'other']),
     'campaign' => request_value('campaign', 'all', ['all', 'discounted', 'no_discount', 'high_discount']),
@@ -512,7 +519,7 @@ $filterValues = [
 ];
 $filterOptions = [
     'date_range' => ['today' => ui_text($ui, 'today'), 'mtd' => ui_text($ui, 'mtd'), 'ytd' => ui_text($ui, 'ytd')],
-    'channel' => ['online' => ui_text($ui, 'online'), 'all' => ui_text($ui, 'all_online')],
+    'channel' => ['online' => ui_text($ui, 'online')],
     'branch_label' => ui_text($ui, 'platform'),
     'branch' => $shopOptions,
     'category' => [
@@ -668,6 +675,17 @@ $validSalesSql = " AND o.order_status NOT IN ('Cancelled', 'Return')";
  * o.total_amount, so it's a reliable revenue figure even though it doesn't reconcile
  * with o.subtotal (subtotal/unit_price appear to reflect pre-livestream catalog
  * pricing, not the actual transaction amount — see SYSTEM_MAP.md Known Data Risks).
+ *
+ * IMPORTANT — every query below must LEFT JOIN this (never INNER JOIN), and wrap
+ * ia.netSales/ia.units in COALESCE(..., o.total_amount / 0). Audit found 84,442 real
+ * orders (25.4% of all valid orders, ฿12.13M) that have an order header in
+ * fact_online_orders but ZERO rows in fact_online_order_items — an ETL gap, not a
+ * gift/category filter effect. An INNER JOIN silently drops these orders from every
+ * KPI/chart/table on the page, including order-header fields (discount_amount,
+ * order_status) that have nothing to do with the item-level filter. The drop is
+ * concentrated in Nov-Dec 2025 (51-62% of those months' revenue missing) — exactly the
+ * window this page later uses as its YoY baseline, so the effect was invisible today but
+ * would have produced a false YoY growth spike once the calendar reached Dec 2026.
  */
 $itemAggCte = "item_agg AS (
         SELECT i.order_key, SUM(i.quantity) AS units, SUM(i.line_total) AS netSales
@@ -681,12 +699,12 @@ $summaryRows = fetch_all($conn, "
     SELECT
         'mtd' AS period,
         COUNT(DISTINCT o.order_key) AS orders,
-        SUM(ia.units) AS units,
-        SUM(ia.netSales) AS netSales,
+        SUM(COALESCE(ia.units, 0)) AS units,
+        SUM(COALESCE(ia.netSales, o.total_amount, 0)) AS netSales,
         SUM(o.subtotal) AS grossSales,
         SUM(o.discount_amount) AS discount
     FROM fact_online_orders o
-    JOIN item_agg ia ON ia.order_key = o.order_key
+    LEFT JOIN item_agg ia ON ia.order_key = o.order_key
     WHERE o.order_datetime >= ? AND o.order_datetime < ? {$headerSql}{$validSalesSql}
 
     UNION ALL
@@ -694,12 +712,12 @@ $summaryRows = fetch_all($conn, "
     SELECT
         'prev_mtd' AS period,
         COUNT(DISTINCT o.order_key) AS orders,
-        SUM(ia.units) AS units,
-        SUM(ia.netSales) AS netSales,
+        SUM(COALESCE(ia.units, 0)) AS units,
+        SUM(COALESCE(ia.netSales, o.total_amount, 0)) AS netSales,
         SUM(o.subtotal) AS grossSales,
         SUM(o.discount_amount) AS discount
     FROM fact_online_orders o
-    JOIN item_agg ia ON ia.order_key = o.order_key
+    LEFT JOIN item_agg ia ON ia.order_key = o.order_key
     WHERE o.order_datetime >= ? AND o.order_datetime < ? {$headerSql}{$validSalesSql};
 ", array_merge($itemParams, [$periodStart, $periodEnd], $headerParams, [$targetStart, $targetEnd], $headerParams));
 
@@ -731,11 +749,11 @@ $dailyTrend = fetch_all($conn, "
     SELECT
         CONVERT(varchar(10), CAST(o.order_datetime AS date), 120) AS saleDate,
         COUNT(DISTINCT o.order_key) AS orders,
-        SUM(ia.units) AS units,
-        SUM(ia.netSales) AS netSales,
+        SUM(COALESCE(ia.units, 0)) AS units,
+        SUM(COALESCE(ia.netSales, o.total_amount, 0)) AS netSales,
         SUM(o.discount_amount) AS discount
     FROM fact_online_orders o
-    JOIN item_agg ia ON ia.order_key = o.order_key
+    LEFT JOIN item_agg ia ON ia.order_key = o.order_key
     WHERE o.order_datetime >= ? AND o.order_datetime < ? {$headerSql}{$validSalesSql}
     GROUP BY CAST(o.order_datetime AS date)
     ORDER BY CAST(o.order_datetime AS date);
@@ -763,9 +781,9 @@ $discountTierRows = fetch_all($conn, "
         CONVERT(varchar(10), CAST(o.order_datetime AS date), 120) AS saleDate,
         {$discountTierCase} AS bucket,
         COUNT(DISTINCT o.order_key) AS orders,
-        SUM(ia.netSales) AS netSales
+        SUM(COALESCE(ia.netSales, o.total_amount, 0)) AS netSales
     FROM fact_online_orders o
-    JOIN item_agg ia ON ia.order_key = o.order_key
+    LEFT JOIN item_agg ia ON ia.order_key = o.order_key
     WHERE o.order_datetime >= ? AND o.order_datetime < ? {$headerSqlNoCampaign}{$validSalesSql}
     GROUP BY CAST(o.order_datetime AS date), {$discountTierCase}
     ORDER BY CAST(o.order_datetime AS date);
@@ -785,12 +803,12 @@ $platforms = fetch_all($conn, "
     SELECT
         o.platform AS shopName,
         COUNT(DISTINCT o.order_key) AS orders,
-        SUM(ia.units) AS units,
-        SUM(ia.netSales) AS netSales,
+        SUM(COALESCE(ia.units, 0)) AS units,
+        SUM(COALESCE(ia.netSales, o.total_amount, 0)) AS netSales,
         SUM(o.subtotal) AS grossSales,
         SUM(o.discount_amount) AS discount
     FROM fact_online_orders o
-    JOIN item_agg ia ON ia.order_key = o.order_key
+    LEFT JOIN item_agg ia ON ia.order_key = o.order_key
     WHERE o.order_datetime >= ? AND o.order_datetime < ? {$headerSql}{$validSalesSql}
     GROUP BY o.platform
     ORDER BY netSales DESC;
@@ -843,9 +861,9 @@ $statusRows = fetch_all($conn, "
     SELECT
         o.order_status AS orderStatus,
         COUNT(DISTINCT o.order_key) AS orders,
-        SUM(ia.netSales) AS netSales
+        SUM(COALESCE(ia.netSales, o.total_amount, 0)) AS netSales
     FROM fact_online_orders o
-    JOIN item_agg ia ON ia.order_key = o.order_key
+    LEFT JOIN item_agg ia ON ia.order_key = o.order_key
     WHERE o.order_datetime >= ? AND o.order_datetime < ? {$headerSql}
     GROUP BY o.order_status
     ORDER BY netSales DESC;
@@ -872,9 +890,9 @@ $cancelWatchRows = fetch_all($conn, "
     latest AS (
         SELECT o.platform AS shopName, COUNT(DISTINCT o.order_key) AS orders_,
             COUNT(DISTINCT CASE WHEN o.order_status = 'Cancelled' THEN o.order_key END) AS cancelled_,
-            SUM(CASE WHEN o.order_status = 'Cancelled' THEN ia.netSales ELSE 0 END) AS lostNet
+            SUM(CASE WHEN o.order_status = 'Cancelled' THEN COALESCE(ia.netSales, o.total_amount, 0) ELSE 0 END) AS lostNet
         FROM fact_online_orders o
-        JOIN item_agg ia ON ia.order_key = o.order_key
+        LEFT JOIN item_agg ia ON ia.order_key = o.order_key
         WHERE CAST(o.order_datetime AS date) = ? {$headerSql}
         GROUP BY o.platform
     ),
@@ -882,7 +900,7 @@ $cancelWatchRows = fetch_all($conn, "
         SELECT o.platform AS shopName, COUNT(DISTINCT o.order_key) AS orders_,
             COUNT(DISTINCT CASE WHEN o.order_status = 'Cancelled' THEN o.order_key END) AS cancelled_
         FROM fact_online_orders o
-        JOIN item_agg ia ON ia.order_key = o.order_key
+        LEFT JOIN item_agg ia ON ia.order_key = o.order_key
         WHERE o.order_datetime >= DATEADD(day, -30, ?) AND o.order_datetime < ? {$headerSql}
         GROUP BY o.platform
     )
@@ -917,16 +935,16 @@ usort($cancelWatch, fn($a, $b) => $b['lostNet'] <=> $a['lostNet']);
 $attentionRows = fetch_all($conn, "
     WITH {$itemAggCte},
     latest AS (
-        SELECT o.platform AS shopName, SUM(ia.netSales) AS net
+        SELECT o.platform AS shopName, SUM(COALESCE(ia.netSales, o.total_amount, 0)) AS net
         FROM fact_online_orders o
-        JOIN item_agg ia ON ia.order_key = o.order_key
+        LEFT JOIN item_agg ia ON ia.order_key = o.order_key
         WHERE CAST(o.order_datetime AS date) = ? {$headerSql}{$validSalesSql}
         GROUP BY o.platform
     ),
     baseline AS (
-        SELECT o.platform AS shopName, SUM(ia.netSales) * 1.0 / COUNT(DISTINCT CAST(o.order_datetime AS date)) AS avgNet
+        SELECT o.platform AS shopName, SUM(COALESCE(ia.netSales, o.total_amount, 0)) * 1.0 / COUNT(DISTINCT CAST(o.order_datetime AS date)) AS avgNet
         FROM fact_online_orders o
-        JOIN item_agg ia ON ia.order_key = o.order_key
+        LEFT JOIN item_agg ia ON ia.order_key = o.order_key
         WHERE CAST(o.order_datetime AS date) IN (DATEADD(week, -1, ?), DATEADD(week, -2, ?), DATEADD(week, -3, ?), DATEADD(week, -4, ?)) {$headerSql}{$validSalesSql}
         GROUP BY o.platform
     )
@@ -1003,9 +1021,9 @@ $monthEndForProj = new DateTime($latestCompleteDate->format('Y-m-t'));
 
 $projActualRow = fetch_one($conn, "
     WITH {$itemAggCte}
-    SELECT SUM(ia.netSales) AS net
+    SELECT SUM(COALESCE(ia.netSales, o.total_amount, 0)) AS net
     FROM fact_online_orders o
-    JOIN item_agg ia ON ia.order_key = o.order_key
+    LEFT JOIN item_agg ia ON ia.order_key = o.order_key
     WHERE o.order_datetime >= ? AND o.order_datetime < ? {$headerSql}{$validSalesSql};
 ", array_merge($itemParams, [$mtdStartForProjStr, $latestCompleteDateNext], $headerParams));
 $projActualSoFar = n($projActualRow['net'] ?? 0);
@@ -1013,9 +1031,9 @@ $projActualSoFar = n($projActualRow['net'] ?? 0);
 $weekdayAvgRows = fetch_all($conn, "
     WITH {$itemAggCte}
     SELECT DATEPART(weekday, d) AS dow, AVG(net) AS avgNet FROM (
-        SELECT CAST(o.order_datetime AS date) AS d, SUM(ia.netSales) AS net
+        SELECT CAST(o.order_datetime AS date) AS d, SUM(COALESCE(ia.netSales, o.total_amount, 0)) AS net
         FROM fact_online_orders o
-        JOIN item_agg ia ON ia.order_key = o.order_key
+        LEFT JOIN item_agg ia ON ia.order_key = o.order_key
         WHERE o.order_datetime >= DATEADD(day, -56, ?) AND o.order_datetime < ? {$headerSql}{$validSalesSql}
         GROUP BY CAST(o.order_datetime AS date)
     ) x GROUP BY DATEPART(weekday, d);
@@ -1037,9 +1055,9 @@ $projectedMonthEnd = $projActualSoFar + $remainingProjected;
 $prevMonthStartForProj = (clone $mtdStartForProj)->modify('-1 month');
 $prevMonthRow = fetch_one($conn, "
     WITH {$itemAggCte}
-    SELECT SUM(ia.netSales) AS net
+    SELECT SUM(COALESCE(ia.netSales, o.total_amount, 0)) AS net
     FROM fact_online_orders o
-    JOIN item_agg ia ON ia.order_key = o.order_key
+    LEFT JOIN item_agg ia ON ia.order_key = o.order_key
     WHERE o.order_datetime >= ? AND o.order_datetime < ? {$headerSql}{$validSalesSql};
 ", array_merge($itemParams, [$prevMonthStartForProj->format('Y-m-d'), $mtdStartForProjStr], $headerParams));
 $prevMonthActual = n($prevMonthRow['net'] ?? 0);
@@ -1053,9 +1071,9 @@ if ($lyMonthHasReliableData) {
     $lyMonthEndForProj = (clone $lyMonthStartForProj)->modify('+1 month');
     $lyMonthRow = fetch_one($conn, "
         WITH {$itemAggCte}
-        SELECT SUM(ia.netSales) AS net
+        SELECT SUM(COALESCE(ia.netSales, o.total_amount, 0)) AS net
         FROM fact_online_orders o
-        JOIN item_agg ia ON ia.order_key = o.order_key
+        LEFT JOIN item_agg ia ON ia.order_key = o.order_key
         WHERE o.order_datetime >= ? AND o.order_datetime < ? {$headerSql}{$validSalesSql};
     ", array_merge($itemParams, [$lyMonthStartForProj->format('Y-m-d'), $lyMonthEndForProj->format('Y-m-d')], $headerParams));
     $lyMonthActual = n($lyMonthRow['net'] ?? 0);
@@ -1143,9 +1161,9 @@ foreach ($weekdayOrderRows as $row) {
  */
 $segmentRevenueRows = fetch_all($conn, "
     WITH {$itemAggCte}
-    SELECT c.customer_segment AS segment, COUNT(DISTINCT o.order_key) AS orders, SUM(ia.netSales) AS netSales
+    SELECT c.customer_segment AS segment, COUNT(DISTINCT o.order_key) AS orders, SUM(COALESCE(ia.netSales, o.total_amount, 0)) AS netSales
     FROM fact_online_orders o
-    JOIN item_agg ia ON ia.order_key = o.order_key
+    LEFT JOIN item_agg ia ON ia.order_key = o.order_key
     JOIN DimOnlineCustomer c ON c.customer_key = o.customer_key
     WHERE o.order_datetime >= ? AND o.order_datetime < ? {$headerSql}{$validSalesSql}
     GROUP BY c.customer_segment
@@ -1189,9 +1207,9 @@ foreach ($repeatPurchaseRows as $row) {
 $provinceGroupCase = province_group_case('c.province');
 $provinceRevenueRows = fetch_all($conn, "
     WITH {$itemAggCte}
-    SELECT TOP 10 {$provinceGroupCase} AS provinceGroup, COUNT(DISTINCT o.order_key) AS orders, SUM(ia.netSales) AS netSales
+    SELECT TOP 10 {$provinceGroupCase} AS provinceGroup, COUNT(DISTINCT o.order_key) AS orders, SUM(COALESCE(ia.netSales, o.total_amount, 0)) AS netSales
     FROM fact_online_orders o
-    JOIN item_agg ia ON ia.order_key = o.order_key
+    LEFT JOIN item_agg ia ON ia.order_key = o.order_key
     JOIN DimOnlineCustomer c ON c.customer_key = o.customer_key
     WHERE o.order_datetime >= ? AND o.order_datetime < ? {$headerSql}{$validSalesSql}
     GROUP BY {$provinceGroupCase}

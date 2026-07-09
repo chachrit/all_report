@@ -69,6 +69,19 @@ $filterValues = [
 ];
 
 /**
+ * growth_badge_html() used to hard-default every badge's label to " vs last month"
+ * regardless of the active date_range — so "Today" mode (which actually compares
+ * against yesterday) and "YTD" mode (which compares against last year) both displayed
+ * a label describing a comparison that wasn't the one being shown. The math was correct;
+ * only the label lied about what it was measuring.
+ */
+$growthSuffix = match ($filterValues['date_range']) {
+    'today' => ' vs yesterday',
+    'ytd' => ' vs last year',
+    default => ' vs last month',
+};
+
+/**
  * Retail branch scope, copied verbatim from dashboard_offline.php: FactSales only
  * ever carries rows for physical "Journal <mall>" POS branches (warehouses/
  * consignment/HQ/online never post sales lines here), except "Journal Online" which
@@ -131,8 +144,17 @@ if ($filterValues['date_range'] === 'today') {
 } else {
     $onlinePeriodStart = clone $onlineMtdStart;
     $onlinePeriodEnd = clone $onlineMtdEnd;
+    /**
+     * Previous-month baseline must span the SAME elapsed length as the current partial
+     * month, not the full previous month — otherwise a partial current month (e.g. 8
+     * days in) is compared against 30 full days and always reads "down" by
+     * construction, regardless of real performance. Audit found this rendering
+     * "-71.4% vs last month" when the true pace-adjusted comparison was "+10.6%". Fix
+     * mirrors dashboard_online.php's MoM baseline (shift bounds back exactly 1 month,
+     * using the real elapsed end date $onlineMaxDate, not the full month's end).
+     */
     $onlineTargetStart = clone $onlinePrevMonthStart;
-    $onlineTargetEnd = clone $onlineMtdStart;
+    $onlineTargetEnd = (clone $onlineMaxDate)->modify('+1 day')->modify('-1 month');
 }
 
 /**
@@ -141,6 +163,12 @@ if ($filterValues['date_range'] === 'today') {
  * reliably to total_amount (verified against dashboard_online.php); unit_price = 0
  * excludes gift/free lines from unit counts, matching the same default behavior used
  * on the Online dashboard (see SYSTEM_MAP.md Known Data Risks).
+ *
+ * IMPORTANT — every query below must LEFT JOIN this (never INNER JOIN), and wrap
+ * ia.netSales/ia.units in COALESCE(..., o.total_amount / 0). ~25% of real orders have a
+ * header row in fact_online_orders but zero rows in fact_online_order_items (an ETL
+ * gap) — an INNER JOIN silently drops those orders from every figure on this page. Same
+ * root cause and fix as dashboard_online.php's item_agg (see that file's CTE comment).
  */
 const ONLINE_ITEM_AGG_CTE = "item_agg AS (
         SELECT i.order_key, SUM(i.quantity) AS units, SUM(i.line_total) AS netSales
@@ -152,32 +180,32 @@ const ONLINE_VALID_SALES_SQL = " AND o.order_status NOT IN ('Cancelled', 'Return
 
 $onlineSummaryRows = fetch_all($conn, "
     WITH " . ONLINE_ITEM_AGG_CTE . "
-    SELECT 'current' AS period, COUNT(DISTINCT o.order_key) AS orders, SUM(ia.units) AS units, SUM(ia.netSales) AS netSales
-    FROM fact_online_orders o JOIN item_agg ia ON ia.order_key = o.order_key
+    SELECT 'current' AS period, COUNT(DISTINCT o.order_key) AS orders, SUM(COALESCE(ia.units, 0)) AS units, SUM(COALESCE(ia.netSales, o.total_amount, 0)) AS netSales
+    FROM fact_online_orders o LEFT JOIN item_agg ia ON ia.order_key = o.order_key
     WHERE o.order_datetime >= ? AND o.order_datetime < ?" . ONLINE_VALID_SALES_SQL . "
 
     UNION ALL
 
-    SELECT 'prev' AS period, COUNT(DISTINCT o.order_key) AS orders, SUM(ia.units) AS units, SUM(ia.netSales) AS netSales
-    FROM fact_online_orders o JOIN item_agg ia ON ia.order_key = o.order_key
+    SELECT 'prev' AS period, COUNT(DISTINCT o.order_key) AS orders, SUM(COALESCE(ia.units, 0)) AS units, SUM(COALESCE(ia.netSales, o.total_amount, 0)) AS netSales
+    FROM fact_online_orders o LEFT JOIN item_agg ia ON ia.order_key = o.order_key
     WHERE o.order_datetime >= ? AND o.order_datetime < ?" . ONLINE_VALID_SALES_SQL . "
 
     UNION ALL
 
-    SELECT 'ytd' AS period, COUNT(DISTINCT o.order_key) AS orders, SUM(ia.units) AS units, SUM(ia.netSales) AS netSales
-    FROM fact_online_orders o JOIN item_agg ia ON ia.order_key = o.order_key
+    SELECT 'ytd' AS period, COUNT(DISTINCT o.order_key) AS orders, SUM(COALESCE(ia.units, 0)) AS units, SUM(COALESCE(ia.netSales, o.total_amount, 0)) AS netSales
+    FROM fact_online_orders o LEFT JOIN item_agg ia ON ia.order_key = o.order_key
     WHERE o.order_datetime >= ? AND o.order_datetime < ?" . ONLINE_VALID_SALES_SQL . "
 
     UNION ALL
 
-    SELECT 'month' AS period, COUNT(DISTINCT o.order_key) AS orders, SUM(ia.units) AS units, SUM(ia.netSales) AS netSales
-    FROM fact_online_orders o JOIN item_agg ia ON ia.order_key = o.order_key
+    SELECT 'month' AS period, COUNT(DISTINCT o.order_key) AS orders, SUM(COALESCE(ia.units, 0)) AS units, SUM(COALESCE(ia.netSales, o.total_amount, 0)) AS netSales
+    FROM fact_online_orders o LEFT JOIN item_agg ia ON ia.order_key = o.order_key
     WHERE o.order_datetime >= ? AND o.order_datetime < ?" . ONLINE_VALID_SALES_SQL . "
 
     UNION ALL
 
-    SELECT 'prev_month' AS period, COUNT(DISTINCT o.order_key) AS orders, SUM(ia.units) AS units, SUM(ia.netSales) AS netSales
-    FROM fact_online_orders o JOIN item_agg ia ON ia.order_key = o.order_key
+    SELECT 'prev_month' AS period, COUNT(DISTINCT o.order_key) AS orders, SUM(COALESCE(ia.units, 0)) AS units, SUM(COALESCE(ia.netSales, o.total_amount, 0)) AS netSales
+    FROM fact_online_orders o LEFT JOIN item_agg ia ON ia.order_key = o.order_key
     WHERE o.order_datetime >= ? AND o.order_datetime < ?" . ONLINE_VALID_SALES_SQL . ";
 ", [
     $onlinePeriodStart->format('Y-m-d'), $onlinePeriodEnd->format('Y-m-d'),
@@ -208,16 +236,16 @@ $onlineGrowth = $onlineBaselineReliable ? pct_change($onlineNetSales, $onlinePre
 
 $onlinePlatformCurrentRows = fetch_all($conn, "
     WITH " . ONLINE_ITEM_AGG_CTE . "
-    SELECT o.platform, COUNT(DISTINCT o.order_key) AS orders, SUM(ia.units) AS units, SUM(ia.netSales) AS netSales
-    FROM fact_online_orders o JOIN item_agg ia ON ia.order_key = o.order_key
+    SELECT o.platform, COUNT(DISTINCT o.order_key) AS orders, SUM(COALESCE(ia.units, 0)) AS units, SUM(COALESCE(ia.netSales, o.total_amount, 0)) AS netSales
+    FROM fact_online_orders o LEFT JOIN item_agg ia ON ia.order_key = o.order_key
     WHERE o.order_datetime >= ? AND o.order_datetime < ?" . ONLINE_VALID_SALES_SQL . "
     GROUP BY o.platform
     ORDER BY netSales DESC;
 ", [$onlinePeriodStart->format('Y-m-d'), $onlinePeriodEnd->format('Y-m-d')]);
 $onlinePlatformPrevRows = fetch_all($conn, "
     WITH " . ONLINE_ITEM_AGG_CTE . "
-    SELECT o.platform, SUM(ia.netSales) AS netSales
-    FROM fact_online_orders o JOIN item_agg ia ON ia.order_key = o.order_key
+    SELECT o.platform, SUM(COALESCE(ia.netSales, o.total_amount, 0)) AS netSales
+    FROM fact_online_orders o LEFT JOIN item_agg ia ON ia.order_key = o.order_key
     WHERE o.order_datetime >= ? AND o.order_datetime < ?" . ONLINE_VALID_SALES_SQL . "
     GROUP BY o.platform;
 ", [$onlineTargetStart->format('Y-m-d'), $onlineTargetEnd->format('Y-m-d')]);
@@ -286,8 +314,8 @@ $trendMonthsBack = ($filterValues['date_range'] === 'ytd')
 $onlineTrendStart = (clone $onlineMtdStart)->modify("-{$trendMonthsBack} months");
 $onlineTrendRows = fetch_all($conn, "
     WITH " . ONLINE_ITEM_AGG_CTE . "
-    SELECT FORMAT(o.order_datetime, 'yyyy-MM') AS ym, o.platform, SUM(ia.netSales) AS netSales
-    FROM fact_online_orders o JOIN item_agg ia ON ia.order_key = o.order_key
+    SELECT FORMAT(o.order_datetime, 'yyyy-MM') AS ym, o.platform, SUM(COALESCE(ia.netSales, o.total_amount, 0)) AS netSales
+    FROM fact_online_orders o LEFT JOIN item_agg ia ON ia.order_key = o.order_key
     WHERE o.order_datetime >= ? AND o.order_datetime < ?" . ONLINE_VALID_SALES_SQL . "
     GROUP BY FORMAT(o.order_datetime, 'yyyy-MM'), o.platform;
 ", [$onlineTrendStart->format('Y-m-d'), $onlineMtdEnd->format('Y-m-d')]);
@@ -330,8 +358,9 @@ if ($filterValues['date_range'] === 'today') {
 } else {
     $offlinePeriodStartKey = $offlineMtdStartKey;
     $offlinePeriodEndKey = $offlineMtdEndKey;
+    // Same elapsed-length fix as Online's MTD baseline above — see that comment.
     $offlineTargetStartKey = $offlinePrevMonthStartKey;
-    $offlineTargetEndKey = $offlineMtdStartKey;
+    $offlineTargetEndKey = (int) (clone $offlineMaxDate)->modify('+1 day')->modify('-1 month')->format('Ymd');
 }
 
 $offlineSummaryRows = fetch_all($conn, "
@@ -632,15 +661,15 @@ $totalTrendPrevious = [];
 if ($totalTrendGranularity === 'hour') {
     $onlineHourRows = fetch_all($conn, "
         WITH " . ONLINE_ITEM_AGG_CTE . "
-        SELECT DATEPART(HOUR, o.order_datetime) AS bucket, SUM(ia.netSales) AS netSales
-        FROM fact_online_orders o JOIN item_agg ia ON ia.order_key = o.order_key
+        SELECT DATEPART(HOUR, o.order_datetime) AS bucket, SUM(COALESCE(ia.netSales, o.total_amount, 0)) AS netSales
+        FROM fact_online_orders o LEFT JOIN item_agg ia ON ia.order_key = o.order_key
         WHERE o.order_datetime >= ? AND o.order_datetime < ?" . ONLINE_VALID_SALES_SQL . "
         GROUP BY DATEPART(HOUR, o.order_datetime);
     ", [$onlinePeriodStart->format('Y-m-d H:i:s'), $onlinePeriodEnd->format('Y-m-d H:i:s')]);
     $onlinePrevHourRows = fetch_all($conn, "
         WITH " . ONLINE_ITEM_AGG_CTE . "
-        SELECT DATEPART(HOUR, o.order_datetime) AS bucket, SUM(ia.netSales) AS netSales
-        FROM fact_online_orders o JOIN item_agg ia ON ia.order_key = o.order_key
+        SELECT DATEPART(HOUR, o.order_datetime) AS bucket, SUM(COALESCE(ia.netSales, o.total_amount, 0)) AS netSales
+        FROM fact_online_orders o LEFT JOIN item_agg ia ON ia.order_key = o.order_key
         WHERE o.order_datetime >= ? AND o.order_datetime < ?" . ONLINE_VALID_SALES_SQL . "
         GROUP BY DATEPART(HOUR, o.order_datetime);
     ", [$onlineTargetStart->format('Y-m-d H:i:s'), $onlineTargetEnd->format('Y-m-d H:i:s')]);
@@ -667,15 +696,15 @@ if ($totalTrendGranularity === 'hour') {
 
     $onlineDayRows = fetch_all($conn, "
         WITH " . ONLINE_ITEM_AGG_CTE . "
-        SELECT DAY(o.order_datetime) AS bucket, SUM(ia.netSales) AS netSales
-        FROM fact_online_orders o JOIN item_agg ia ON ia.order_key = o.order_key
+        SELECT DAY(o.order_datetime) AS bucket, SUM(COALESCE(ia.netSales, o.total_amount, 0)) AS netSales
+        FROM fact_online_orders o LEFT JOIN item_agg ia ON ia.order_key = o.order_key
         WHERE o.order_datetime >= ? AND o.order_datetime < ?" . ONLINE_VALID_SALES_SQL . "
         GROUP BY DAY(o.order_datetime);
     ", [$onlinePeriodStart->format('Y-m-d'), $onlinePeriodEnd->format('Y-m-d')]);
     $onlinePrevDayRows = fetch_all($conn, "
         WITH " . ONLINE_ITEM_AGG_CTE . "
-        SELECT DAY(o.order_datetime) AS bucket, SUM(ia.netSales) AS netSales
-        FROM fact_online_orders o JOIN item_agg ia ON ia.order_key = o.order_key
+        SELECT DAY(o.order_datetime) AS bucket, SUM(COALESCE(ia.netSales, o.total_amount, 0)) AS netSales
+        FROM fact_online_orders o LEFT JOIN item_agg ia ON ia.order_key = o.order_key
         WHERE o.order_datetime >= ? AND o.order_datetime < ?" . ONLINE_VALID_SALES_SQL . "
         GROUP BY DAY(o.order_datetime);
     ", [$onlineTargetStart->format('Y-m-d'), $onlineTargetEnd->format('Y-m-d')]);
@@ -710,8 +739,8 @@ if ($totalTrendGranularity === 'hour') {
     // query the same Jan..current-month window one year back for "previous".
     $onlineMonthRows = fetch_all($conn, "
         WITH " . ONLINE_ITEM_AGG_CTE . "
-        SELECT MONTH(o.order_datetime) AS bucket, SUM(ia.netSales) AS netSales
-        FROM fact_online_orders o JOIN item_agg ia ON ia.order_key = o.order_key
+        SELECT MONTH(o.order_datetime) AS bucket, SUM(COALESCE(ia.netSales, o.total_amount, 0)) AS netSales
+        FROM fact_online_orders o LEFT JOIN item_agg ia ON ia.order_key = o.order_key
         WHERE o.order_datetime >= ? AND o.order_datetime < ?" . ONLINE_VALID_SALES_SQL . "
         GROUP BY MONTH(o.order_datetime);
     ", [$onlineTargetStart->format('Y-m-d'), $onlineTargetEnd->format('Y-m-d')]);
@@ -867,6 +896,33 @@ $achievement = ($mockData['goal']['monthlyTarget'] > 0) ? ($mockData['goal']['cu
 $ytdPct = ($mockData['goal']['annual'] > 0) ? ($mockData['goal']['currentYear'] / $mockData['goal']['annual']) * 100 : 0;
 $isProjectedAhead = $mockData['goal']['projected'] >= $mockData['goal']['annual'];
 
+/**
+ * $achievement is currentMonth (partial, month still in progress) over monthlyTarget
+ * (the FULL month's target) — an honest % to show as a number, but coloring red
+ * whenever it's under 100% means red lights up almost every day of the month by
+ * construction (day 9 of 30 is naturally ~30%), regardless of whether pacing is
+ * actually fine. Color decisions below use a pace-adjusted target instead (target
+ * scaled by how much of the month has elapsed) — same fix as the channel bars in the
+ * "Monthly Target Progress" section further down the page.
+ */
+$goalMaxDate = max($onlineMaxDate, $offlineMaxDate);
+$goalDaysInMonth = (int) $goalMaxDate->format('t');
+$goalDayOfMonth = (int) $goalMaxDate->format('j');
+$pacedMonthlyTarget = $mockData['goal']['monthlyTarget'] * ($goalDayOfMonth / $goalDaysInMonth);
+$monthlyPaceRatio = $pacedMonthlyTarget > 0 ? ($mockData['goal']['currentMonth'] / $pacedMonthlyTarget) * 100 : 100;
+if ($monthlyPaceRatio >= 100) {
+    $monthlyPaceColor = '#4E7D57';
+} elseif ($monthlyPaceRatio >= 85) {
+    $monthlyPaceColor = '#B45309';
+} else {
+    $monthlyPaceColor = '#EF4444';
+}
+// Was hardcoded `true` — the big status pill above the donut always said "On Track"
+// regardless of real pacing, directly contradicting the now-correctly-colored bar
+// below it in the same card. Wire it to the same pace math instead of a second,
+// disconnected source of truth.
+$mockData['goal']['onTrack'] = $monthlyPaceRatio >= 100;
+
 $donutR = 60;
 $donutCircumference = 2 * M_PI * $donutR;
 $donutOffset = $donutCircumference * (1 - max(0, min(100, $ytdPct)) / 100);
@@ -907,7 +963,7 @@ $donutOffset = $donutCircumference * (1 - max(0, min(100, $ytdPct)) / 100);
                     </div>
                     <div class="annual-goal-stat">
                         <div class="stat-label">Achievement</div>
-                        <div class="stat-value count-up <?php echo $achievement >= 100 ? 'is-positive' : 'is-negative'; ?>" data-count-to="<?php echo $achievement; ?>" data-decimals="1" data-suffix="%">0%</div>
+                        <div class="stat-value count-up" style="color: <?php echo $monthlyPaceColor; ?>;" data-count-to="<?php echo $achievement; ?>" data-decimals="1" data-suffix="%">0%</div>
                     </div>
                     <div class="annual-goal-stat">
                         <div class="stat-label">Monthly Target</div>
@@ -932,7 +988,7 @@ $donutOffset = $donutCircumference * (1 - max(0, min(100, $ytdPct)) / 100);
                         <span><?php echo number_format(min(100, $achievement), 0); ?>%</span>
                     </div>
                     <div class="annual-goal-progress-track">
-                        <div class="annual-goal-progress-fill" style="width: <?php echo max(0, min(100, $achievement)); ?>%; background: <?php echo $achievement >= 100 ? '#4E7D57' : '#EF4444'; ?>;"></div>
+                        <div class="annual-goal-progress-fill" style="width: <?php echo max(0, min(100, $achievement)); ?>%; background: <?php echo $monthlyPaceColor; ?>;"></div>
                     </div>
                 </div>
             </div>
@@ -946,20 +1002,48 @@ $donutOffset = $donutCircumference * (1 - max(0, min(100, $ytdPct)) / 100);
             <div style="display: flex; flex-direction: column; gap: 20px;">
                 <?php
                 $channels = [
-                    ['name' => 'Online', 'current' => $mockData['monthlyActual']['online'], 'target' => $mockData['monthlyTargets']['online'], 'color' => '#dab937', 'isEstimate' => false],
-                    ['name' => 'Offline', 'current' => $mockData['monthlyActual']['offline'], 'target' => $mockData['monthlyTargets']['offline'], 'color' => '#4f8b98', 'isEstimate' => false],
-                    ['name' => 'Consignment', 'current' => $mockData['monthlyActual']['consignment'], 'target' => $mockData['monthlyTargets']['consignment'], 'color' => '#62307a', 'isEstimate' => true],
+                    ['name' => 'Online', 'current' => $mockData['monthlyActual']['online'], 'target' => $mockData['monthlyTargets']['online'], 'color' => '#dab937', 'isEstimate' => false, 'maxDate' => $onlineMaxDate],
+                    ['name' => 'Offline', 'current' => $mockData['monthlyActual']['offline'], 'target' => $mockData['monthlyTargets']['offline'], 'color' => '#4f8b98', 'isEstimate' => false, 'maxDate' => $offlineMaxDate],
+                    ['name' => 'Consignment', 'current' => $mockData['monthlyActual']['consignment'], 'target' => $mockData['monthlyTargets']['consignment'], 'color' => '#62307a', 'isEstimate' => true, 'maxDate' => $offlineMaxDate],
                 ];
                 foreach ($channels as $channel):
                     $progress = min(100, ($channel['current'] / $channel['target']) * 100);
-                    $isOnTrack = $channel['current'] >= $channel['target'];
-                    $statusColor = $isOnTrack ? '#10b981' : '#ef4444';
-                    $statusText = $isOnTrack ? 'On Track' : 'Behind';
+                    /**
+                     * "current" is this month SO FAR (partial month), but it used to be
+                     * compared directly against the FULL month's target — so on day 9 of a
+                     * 30-day month, current sits at ~30% of target and gets flagged "Behind"
+                     * (red) even with perfectly normal pacing. Red would then light up almost
+                     * every day of the month regardless of actual performance, only clearing on
+                     * the last day or two. Fix: compare against a pace-adjusted target (target
+                     * scaled by how much of the month has elapsed), same day-fraction idea as
+                     * the month-end projection logic in dashboard_online.php.
+                     */
+                    $daysInMonth = (int) $channel['maxDate']->format('t');
+                    $dayOfMonth = (int) $channel['maxDate']->format('j');
+                    $pacedTarget = $channel['target'] * ($dayOfMonth / $daysInMonth);
+                    $paceRatio = $pacedTarget > 0 ? ($channel['current'] / $pacedTarget) * 100 : 100;
+                    if ($paceRatio >= 100) {
+                        $statusColor = '#10b981';
+                        $statusText = 'On Track';
+                        $statusBg = '#d1fae5';
+                    } elseif ($paceRatio >= 85) {
+                        $statusColor = '#B45309';
+                        $statusText = 'Slightly Behind Pace';
+                        $statusBg = 'rgba(245,158,11,0.15)';
+                    } else {
+                        $statusColor = '#ef4444';
+                        $statusText = 'Behind Pace';
+                        $statusBg = '#fee2e2';
+                    }
                     // Consignment has no real sales source yet — both figures are mock, so
                     // an "On Track"/"Behind" verdict here would be fabricated, not measured.
+                    // Label says "Estimated" (not "mock") — that word is internal dev
+                    // shorthand for placeholder data and means nothing to a viewer reading
+                    // this dashboard; the real caveat lives in this comment instead.
                     if ($channel['isEstimate']) {
                         $statusColor = '#9CA3AF';
-                        $statusText = 'Estimate (mock)';
+                        $statusText = 'Estimated';
+                        $statusBg = '#F3F4F6';
                     }
                 ?>
                 <div>
@@ -970,7 +1054,7 @@ $donutOffset = $donutCircumference * (1 - max(0, min(100, $ytdPct)) / 100);
                         </div>
                         <div style="display: flex; align-items: center; gap: 15px;">
                             <span style="font-size: 12px; color: #6B7280;">Target: <?php echo number_format($channel['target'] / 1000000, 1); ?>M</span>
-                            <span style="font-size: 11px; color: <?php echo $statusColor; ?>; font-weight: 600; background: <?php echo $channel['isEstimate'] ? '#F3F4F6' : ($isOnTrack ? '#d1fae5' : '#fee2e2'); ?>; padding: 2px 8px; border-radius: 3px;"><?php echo $statusText; ?></span>
+                            <span style="font-size: 11px; color: <?php echo $statusColor; ?>; font-weight: 600; background: <?php echo $statusBg; ?>; padding: 2px 8px; border-radius: 3px;"><?php echo $statusText; ?></span>
                         </div>
                     </div>
                     <div style="position: relative; height: 24px; background: #f5f5f5; border-radius: 4px; overflow: hidden;">
@@ -1024,7 +1108,7 @@ $donutOffset = $donutCircumference * (1 - max(0, min(100, $ytdPct)) / 100);
         <div class="value">
             <?php echo number_format($mockData['totalSales']['total']); ?>
         </div>
-        <?php echo growth_badge_html($mockData['growth']['total']); ?>
+        <?php echo growth_badge_html($mockData['growth']['total'], $growthSuffix); ?>
     </div>
 
     <div class="kpi-card" onclick="scrollToSection('top-products')">
@@ -1033,7 +1117,7 @@ $donutOffset = $donutCircumference * (1 - max(0, min(100, $ytdPct)) / 100);
         <div class="value">
             <?php echo number_format($mockData['orders']['total']); ?>
         </div>
-        <?php echo growth_badge_html($mockData['growth']['orders']); ?>
+        <?php echo growth_badge_html($mockData['growth']['orders'], $growthSuffix); ?>
     </div>
 
     <div class="kpi-card" onclick="scrollToSection('top-products')">
@@ -1042,7 +1126,7 @@ $donutOffset = $donutCircumference * (1 - max(0, min(100, $ytdPct)) / 100);
         <div class="value">
             <?php echo number_format($mockData['upt'], 2); ?>
         </div>
-        <?php echo growth_badge_html($mockData['growth']['upt']); ?>
+        <?php echo growth_badge_html($mockData['growth']['upt'], $growthSuffix); ?>
     </div>
 
     <div class="kpi-card" onclick="scrollToSection('top-products')">
@@ -1051,7 +1135,7 @@ $donutOffset = $donutCircumference * (1 - max(0, min(100, $ytdPct)) / 100);
         <div class="value">
             <?php echo number_format($mockData['aov']); ?>
         </div>
-        <?php echo growth_badge_html($mockData['growth']['aov']); ?>
+        <?php echo growth_badge_html($mockData['growth']['aov'], $growthSuffix); ?>
     </div>
 
 </div>

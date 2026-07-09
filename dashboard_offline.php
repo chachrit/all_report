@@ -52,6 +52,28 @@ function trend_label(float $value, string $language = 'en'): string
     return '<div class="change ' . $class . '">' . $word . ' ' . number_format(abs($value), 1) . '% ' . $suffix . '</div>';
 }
 
+function neutral_label(string $text): string
+{
+    return '<div class="change neutral">' . htmlspecialchars($text) . '</div>';
+}
+
+/**
+ * pct_change() returns 0.0 whenever the previous-period value is 0 — indistinguishable
+ * from "genuinely flat". That's fine for the unfiltered/all-branches view (a whole-
+ * company total is never 0), but once the branch filter isolates a store that didn't
+ * exist in the prior-year window (e.g. a branch opened this year), $previous really is
+ * 0 and this function used to render "0.0%" — reading as "flat performance" when the
+ * true story is "no comparable baseline, 100% new revenue". Reproduced on 8 branches
+ * and 36 products in a real MTD window via the branch filter.
+ */
+function growth_badge($value, float $previous, string $language, array $ui): string
+{
+    if ($previous == 0.0) {
+        return neutral_label(ui_text($ui, 'no_baseline'));
+    }
+    return trend_label($value, $language);
+}
+
 function money(float $value, int $decimals = 0): string
 {
     return '฿' . number_format($value, $decimals);
@@ -242,6 +264,7 @@ $translations = [
         'category_label' => 'หมวดหมู่', 'campaign_label' => 'แคมเปญ',
         'click_to_filter' => 'คลิกเพื่อกรองข้อมูลทั้งหน้าตามค่านี้',
         'chart_click_hint' => 'คลิกเพื่อกรอง',
+        'no_baseline' => 'ยังไม่มีข้อมูลช่วงเดียวกันปีก่อนให้เทียบ',
     ],
     'en' => [
         'page_title' => 'Offline Sales Dashboard',
@@ -303,6 +326,7 @@ $translations = [
         'category_label' => 'Category', 'campaign_label' => 'Campaign',
         'click_to_filter' => 'Click to filter the whole page by this value',
         'chart_click_hint' => 'Click to filter',
+        'no_baseline' => 'No same-period-last-year data yet',
     ],
 ];
 $ui = $translations[$uiLanguage];
@@ -471,11 +495,20 @@ $dailyTrend = fetch_all($conn, "
     ORDER BY f.DateKey;
 ", repeated_params([$periodStartKey, $periodEndKey], $filterParams));
 
-$todaySales = 0.0;
-if (!empty($dailyTrend)) {
-    $lastDailyRow = $dailyTrend[count($dailyTrend) - 1];
-    $todaySales = n($lastDailyRow['netSales'] ?? 0);
-}
+/**
+ * Queried directly against $maxDateKeyInt (the true latest day), not the last row of
+ * $dailyTrend above — $dailyTrend is scoped to the SELECTED date_range window, so if
+ * the active branch/category filter has zero sales on the true latest day but had sales
+ * on an earlier day within that window, the old code (trusting $dailyTrend's last row)
+ * would silently show that earlier day's number under the "Today Sales" label. Audit
+ * reproduced this on 16 real branch×category filter combos.
+ */
+$todaySalesRow = fetch_one($conn, "
+    SELECT SUM(f.NetTotal) AS netSales
+    FROM FactSales f JOIN DimBranch b ON f.BranchKey = b.BranchKey JOIN DimProduct p ON f.ProductKey = p.ProductKey
+    WHERE f.DateKey = ? AND {$filterSql};
+", array_merge([$maxDateKeyInt], $filterParams));
+$todaySales = n($todaySalesRow['netSales'] ?? 0);
 
 /**
  * Rolling 12-month window (ending at the current/partial month) vs the same 12 months
@@ -547,24 +580,38 @@ $productMix = fetch_all($conn, "
     ORDER BY netSales DESC;
 ", repeated_params([$periodStartKey, $periodEndKey], $filterParams));
 
+/**
+ * Buckets by whether an order has ANY line hitting the campaign filter's own per-line
+ * 20% threshold (line 436 above), not by the order's overall average discount %.
+ * Those two disagreed: an order averaging under 20% could still have one line at 29%,
+ * so it'd land in "discounted" here but get pulled into the campaign=high_discount
+ * filter everywhere else on the page (which tests each FactSales row independently) —
+ * audit found 14 real orders classified differently between the two. This keeps the
+ * chart's order population consistent with what clicking the campaign filter actually
+ * surfaces. MAX(...) picks the highest-severity line per order — an order counts as
+ * high_discount if any single line qualifies, matching "at least one row survives the
+ * filter" semantics used by every other query on the page.
+ */
 $discountMix = fetch_all($conn, "
-    WITH order_disc AS (
-        SELECT f.SourceDocNo, SUM(f.TotalDiscount) AS totalDisc, SUM(f.AmountBeforeDiscount) AS totalGross
+    WITH line_disc AS (
+        SELECT f.SourceDocNo,
+            MAX(CASE WHEN f.AmountBeforeDiscount > 0 AND (f.TotalDiscount * 100.0 / f.AmountBeforeDiscount) >= 20 THEN 1 ELSE 0 END) AS hasHighDiscLine,
+            MAX(CASE WHEN f.TotalDiscount > 0 THEN 1 ELSE 0 END) AS hasDiscLine
         FROM FactSales f JOIN DimBranch b ON f.BranchKey = b.BranchKey JOIN DimProduct p ON f.ProductKey = p.ProductKey
         WHERE f.DateKey >= ? AND f.DateKey < ? AND {$filterSql}
         GROUP BY f.SourceDocNo
     )
     SELECT
         CASE
-            WHEN totalGross > 0 AND (totalDisc * 100.0 / totalGross) >= 20 THEN 'high_discount'
-            WHEN totalDisc > 0 THEN 'discounted'
+            WHEN hasHighDiscLine = 1 THEN 'high_discount'
+            WHEN hasDiscLine = 1 THEN 'discounted'
             ELSE 'no_discount'
         END AS bucket,
         COUNT(*) AS orders
-    FROM order_disc
+    FROM line_disc
     GROUP BY CASE
-            WHEN totalGross > 0 AND (totalDisc * 100.0 / totalGross) >= 20 THEN 'high_discount'
-            WHEN totalDisc > 0 THEN 'discounted'
+            WHEN hasHighDiscLine = 1 THEN 'high_discount'
+            WHEN hasDiscLine = 1 THEN 'discounted'
             ELSE 'no_discount'
         END;
 ", repeated_params([$periodStartKey, $periodEndKey], $filterParams));
@@ -863,6 +910,7 @@ require_once __DIR__ . '/includes/header.php';
     .offline-hero-meta .hero-chip { display: inline-block; margin-top: 6px; padding: 4px 10px; border-radius: 999px; background: rgba(255,255,255,0.08); font-size: 11px; }
     .change.positive { color: #10B981; }
     .change.negative { color: #EF4444; }
+    .change.neutral { color: #9CA3AF; }
     .section-title { display: flex; justify-content: space-between; align-items: center; margin: 6px 0 14px; }
     .section-title h2 { margin: 0; font-size: 16px; font-weight: 600; color: #111827; }
     .section-title span { font-size: 12px; color: #6B7280; }
@@ -944,7 +992,7 @@ require_once __DIR__ . '/includes/header.php';
         <div>
             <div class="offline-hero-title"><?php echo htmlspecialchars($heroTitleDynamic); ?></div>
             <div class="offline-hero-value count-up" data-count-to="<?php echo (float) $mtdNetSales; ?>">0</div>
-            <div class="offline-hero-trend"><?php echo trend_label($salesGrowth, $uiLanguage); ?></div>
+            <div class="offline-hero-trend"><?php echo growth_badge($salesGrowth, $prevNetSales, $uiLanguage, $ui); ?></div>
         </div>
         <div class="offline-hero-meta">
             <div><?php echo htmlspecialchars($periodLabel); ?></div>
@@ -992,25 +1040,25 @@ require_once __DIR__ . '/includes/header.php';
         <div class="tooltip"><?php echo htmlspecialchars(ui_text($ui, 'tooltip_orders')); ?></div>
         <div class="label"><?php echo htmlspecialchars(ui_text($ui, 'orders')); ?></div>
         <div class="value count-up" data-count-to="<?php echo (float) $mtdOrders; ?>">0</div>
-        <?php echo trend_label($orderGrowth, $uiLanguage); ?>
+        <?php echo growth_badge($orderGrowth, $prevOrders, $uiLanguage, $ui); ?>
     </div>
     <div class="kpi-card">
         <div class="tooltip"><?php echo htmlspecialchars(ui_text($ui, 'tooltip_units')); ?></div>
         <div class="label"><?php echo htmlspecialchars(ui_text($ui, 'units_sold')); ?></div>
         <div class="value count-up" data-count-to="<?php echo (float) $mtdUnits; ?>">0</div>
-        <?php echo trend_label($unitGrowth, $uiLanguage); ?>
+        <?php echo growth_badge($unitGrowth, $prevUnits, $uiLanguage, $ui); ?>
     </div>
     <div class="kpi-card">
         <div class="tooltip"><?php echo htmlspecialchars(ui_text($ui, 'tooltip_aov')); ?></div>
         <div class="label"><?php echo htmlspecialchars(ui_text($ui, 'aov')); ?></div>
         <div class="value count-up" data-count-to="<?php echo (float) $mtdAov; ?>" data-prefix="฿">0</div>
-        <?php echo trend_label($aovGrowth, $uiLanguage); ?>
+        <?php echo growth_badge($aovGrowth, $prevAov, $uiLanguage, $ui); ?>
     </div>
     <div class="kpi-card">
         <div class="tooltip"><?php echo htmlspecialchars(ui_text($ui, 'tooltip_upt')); ?></div>
         <div class="label"><?php echo htmlspecialchars(ui_text($ui, 'upt')); ?></div>
         <div class="value count-up" data-count-to="<?php echo (float) $mtdUpt; ?>" data-decimals="2">0</div>
-        <?php echo trend_label($uptGrowth, $uiLanguage); ?>
+        <?php echo growth_badge($uptGrowth, $prevUpt, $uiLanguage, $ui); ?>
         <div class="target-line"><?php echo htmlspecialchars(ui_text($ui, 'top_branch')); ?> <?php echo htmlspecialchars($topBranch['BranchName'] ?? '-'); ?> | <?php echo htmlspecialchars(ui_text($ui, 'top_product')); ?> <?php echo htmlspecialchars($topProduct['ProductName'] ?? '-'); ?></div>
     </div>
 </div>
