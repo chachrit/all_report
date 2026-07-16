@@ -470,7 +470,7 @@ $consignmentBranchesMock = [
 // page's date_range filter — it's a fixed business-tracking widget, not a "view".
 $goalMonthsElapsed = (int) $trendAnchor->format('n');
 $goalCurrentMonth = $onlineMonthActual + $offlineMonthActual + $consignmentTotalSalesMock;
-$goalCurrentYear = $onlineYtdNetSales + $offlineYtdNetSales + ($consignmentTotalSalesMock * $goalMonthsElapsed);
+$goalCurrentYear = $onlineYtdNetSales + $offlineYtdNetSales; // real only — Consignment has no real data (see mock above), so it's excluded, not estimated
 
 /**
  * Consignment has no real per-period figure, so its contribution to the filter-driven
@@ -932,7 +932,7 @@ $donutOffset = $donutCircumference * (1 - max(0, min(100, $ytdPct)) / 100);
             <div class="annual-goal-left">
                 <div class="annual-goal-headline">
                     <span class="annual-goal-live-dot"></span>
-                    <span class="annual-goal-label">Annual Revenue Goal <span class="est">(incl. Consignment est.)</span></span>
+                    <span class="annual-goal-label">Annual Revenue Goal</span>
                 </div>
                 <div class="annual-goal-status <?php echo $mockData['goal']['onTrack'] ? 'is-on' : 'is-off'; ?>">
                     <?php echo $mockData['goal']['onTrack'] ? 'On Track' : 'Off Track'; ?>

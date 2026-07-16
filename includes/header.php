@@ -565,9 +565,75 @@ if (!function_exists('render_change')) {
         .goal-card .stat-item { text-align: center; }
         .goal-card .stat-label { font-size: 11px; color: rgba(255,255,255,0.7); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 5px; font-weight: 500; }
         .goal-card .stat-value { font-size: 24px; font-weight: 300; color: white; }
+
+        /* Every filter/nav change here is a full browser page reload (no AJAX), and
+           each dashboard fires 20+ sequential DB queries per load — this bar gives
+           the user a visible "it's working" signal during that gap. */
+        #pageLoadBar {
+            position: fixed;
+            top: 0; left: 0;
+            height: 3px;
+            width: 100%;
+            background: var(--accent);
+            transform: scaleX(0);
+            transform-origin: left;
+            z-index: 9999;
+            opacity: 0;
+        }
+        #pageLoadBar.is-loading {
+            opacity: 1;
+            transition: transform 2.5s ease-out, opacity 0.2s ease-out;
+            transform: scaleX(0.9);
+        }
+
+        /* Full-page skeleton: the bar alone is easy to miss, so this covers the
+           whole viewport with placeholder blocks shaped like a generic dashboard
+           (filter bar / KPI row / chart row / table) — one shared shape reused by
+           all 4 pages rather than a pixel-perfect copy per page, since the goal is
+           just "something is loading here", not matching exact layout. */
+        #pageLoadSkeleton {
+            position: fixed;
+            inset: 0;
+            z-index: 9998;
+            background: #f0f2f5;
+            padding: 24px;
+            display: none;
+        }
+        #pageLoadSkeleton.is-loading { display: block; }
+        .skel-block {
+            border-radius: 10px;
+            background: linear-gradient(90deg, #e4e7eb 25%, #eef0f3 37%, #e4e7eb 63%);
+            background-size: 400% 100%;
+            animation: skel-shimmer 1.4s ease infinite;
+        }
+        @keyframes skel-shimmer {
+            0% { background-position: 100% 0; }
+            100% { background-position: 0 0; }
+        }
+        .skel-row { display: flex; gap: 16px; margin-bottom: 16px; }
+        .skel-filterbar { height: 56px; border-radius: 14px; margin-bottom: 24px; }
+        .skel-kpi { height: 96px; flex: 1; }
+        .skel-chart { height: 260px; flex: 2; }
+        .skel-chart-sm { height: 260px; flex: 1; }
+        .skel-table { height: 220px; }
     </style>
 </head>
 <body data-ui-lang="<?php echo htmlspecialchars($uiLanguage); ?>" data-current-page="<?php echo htmlspecialchars($currentPage); ?>">
+    <div id="pageLoadBar"></div>
+    <div id="pageLoadSkeleton">
+        <div class="skel-block skel-filterbar"></div>
+        <div class="skel-row">
+            <div class="skel-block skel-kpi"></div>
+            <div class="skel-block skel-kpi"></div>
+            <div class="skel-block skel-kpi"></div>
+            <div class="skel-block skel-kpi"></div>
+        </div>
+        <div class="skel-row">
+            <div class="skel-block skel-chart"></div>
+            <div class="skel-block skel-chart-sm"></div>
+        </div>
+        <div class="skel-block skel-table"></div>
+    </div>
     <div class="header">
         <div>
             <h1><?php echo htmlspecialchars($pageTitle); ?></h1>
@@ -695,6 +761,24 @@ if (!function_exists('render_change')) {
         function updateDashboardData() {
             document.querySelector('.filter-bar').submit();
         }
+
+        // beforeunload fires for every full-page navigation this app does (form
+        // submit, nav link click, back/forward) so one listener covers all of
+        // them without hooking each click/submit individually. If filters ever
+        // move to AJAX instead of full reloads, this needs to move to the fetch
+        // call instead — beforeunload won't fire for that.
+        window.addEventListener('beforeunload', function () {
+            document.getElementById('pageLoadBar').classList.add('is-loading');
+            document.getElementById('pageLoadSkeleton').classList.add('is-loading');
+        });
+        // bfcache restores the DOM as-is (including the classes above), so back/
+        // forward navigation needs an explicit reset or the overlay stays stuck on.
+        window.addEventListener('pageshow', function (e) {
+            if (e.persisted) {
+                document.getElementById('pageLoadBar').classList.remove('is-loading');
+                document.getElementById('pageLoadSkeleton').classList.remove('is-loading');
+            }
+        });
 
         // Replaces each native <select> in the filter bar with a custom trigger +
         // floating panel (browsers render native <select> popups themselves, which
